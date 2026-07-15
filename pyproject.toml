@@ -17,6 +17,11 @@ dependencies = [
     "httpx>=0.27",               # HTTP client for the scraper
     "beautifulsoup4>=4.12",      # HTML parsing of RBI listing pages
     "lxml>=5.3",                 # fast HTML/XML parser backend for bs4
+    "pdfplumber>=0.11",          # PDF text extraction (low-memory MVP parser)
+    "sentence-transformers>=3.0",# BGE-M3 embeddings
+    "anthropic>=0.40",           # LLM answer generation
+    # ---- Phase 1: serving/UI ----
+    "streamlit>=1.38",           # minimal chat UI
 ]
 
 [project.optional-dependencies]
@@ -25,6 +30,9 @@ dev = [
     "httpx>=0.27",               # test client for FastAPI
     "ruff>=0.7",                 # linter + formatter
 ]
+# Layout-aware parser (better tables) — needs significant RAM. Opt-in upgrade
+# over the default pdfplumber path: pip install -e ".[docling]"
+docling = ["docling>=2.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

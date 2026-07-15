@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "compliance_chunks"
 
+    # Embeddings
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_device: str = "cpu"  # cpu | cuda
+    embedding_dim: int = 1024      # BGE-M3 dense vector size
+
+    # LLM (answer generation). Swappable per PROJECT_SPEC.md §7 — never hardcoded.
+    anthropic_api_key: str = ""
+    llm_provider: str = "anthropic"       # anthropic | openai
+    llm_model: str = "claude-sonnet-4-6"  # matches .env.example
+    groundedness_threshold: float = 0.7
+
     # App
     api_host: str = "0.0.0.0"
     api_port: int = 8000

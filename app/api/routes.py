@@ -7,10 +7,39 @@ orchestrator (or you) know the system is *ready*, not merely *running*.
 """
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 from app.config import settings
 
 router = APIRouter(prefix="/api")
+
+
+# ---- /api/query request & response schemas (spec §12) ----
+class QueryRequest(BaseModel):
+    question: str = Field(..., min_length=3, description="Natural-language compliance question")
+    reference_date: str | None = Field(None, description="ISO date; null = as of today")
+
+
+class Citation(BaseModel):
+    doc_number: str
+    title: str
+    url: str
+
+
+class RetrievedSource(BaseModel):
+    doc_number: str
+    title: str
+    section_heading: str | None = None
+    score: float
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    citations: list[Citation]
+    retrieved_sources: list[RetrievedSource]
+    reference_date_used: str
+    model: str | None
+    degraded: bool
 
 
 def _check_postgres() -> bool:
@@ -54,3 +83,12 @@ def health() -> dict:
         "service": "compliancegpt-api",
         "services": services,
     }
+
+
+@router.post("/query", response_model=QueryResponse)
+def query(req: QueryRequest) -> QueryResponse:
+    """Answer a compliance question with citations (Phase 1: dense retrieval)."""
+    from app.agent.pipeline import answer_query
+
+    result = answer_query(req.question, req.reference_date)
+    return QueryResponse(**result)

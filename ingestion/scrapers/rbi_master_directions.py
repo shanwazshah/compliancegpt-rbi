@@ -134,7 +134,9 @@ def parse_detail(detail_html: str) -> tuple[str | None, str | None, str | None]:
         window = text[m.end() : m.end() + 800]
         d = DATE_RE.search(window)
         if d:
-            month, day, year = d.group(1), int(d.group(0).split()[1].rstrip(",")), int(d.group(0)[-4:])
+            month = d.group(1)
+            day = int(d.group(0).split()[1].rstrip(","))
+            year = int(d.group(0)[-4:])
             issue_date = f"{year:04d}-{_MONTHS[month]:02d}-{day:02d}"
 
     # Main PDF = the notification PDF (annexures live under /content/pdfs/*_A#.pdf).

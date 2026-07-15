@@ -1,48 +1,74 @@
-"""PDF -> structured Markdown, using Docling (layout-aware, table-preserving).
+"""PDF -> structured text.
 
-Why Markdown? It keeps the document's *structure* — headings stay headings,
-tables stay tables (as Markdown tables) — which we rely on later for
-structure-aware chunking. Plain text extraction would flatten all of that.
+Parser choice (see PROJECT_SPEC.md §7, §19 "known hard problems"):
+  * The spec's first choice is Docling (layout-aware, reconstructs tables).
+  * On this hardware Docling's page-rasterization step exhausts RAM
+    (std::bad_alloc) on the larger Master Directions, even with OCR disabled.
+  * So the MVP uses **pdfplumber**, which reads embedded text directly (no page
+    rendering) — near-zero memory, fast, reliable for born-digital PDFs. The
+    tradeoff is weaker table reconstruction; Docling remains the documented
+    upgrade for a higher-RAM machine.
 
-Parsed output is cached to data/parsed/<doc>.md so we never re-parse an
-unchanged PDF (parsing is the slow step, so caching matters a lot).
+We still emit lightweight Markdown structure: detected section headings become
+`##` headings so the structure-aware chunker can split along them.
 
-Run (parse everything in the manifest):
-    python -m ingestion.parsing.pdf_to_structured
+Output is cached to data/parsed/<doc>.md so we never re-parse an unchanged PDF.
+
+Run:  python -m ingestion.parsing.pdf_to_structured
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+import pdfplumber
 
 DATA = Path("data")
 MANIFEST = DATA / "nbfc_manifest.json"
 PARSED_DIR = DATA / "parsed"
 
-# Lazily created so importing this module is cheap (Docling is heavy to import).
-_converter = None
+# Heading heuristics tuned for RBI Master Directions. Only STRUCTURAL markers
+# (Chapter/Part/Annexure/Schedule) start a new section — deliberately NOT every
+# numbered clause ("2.", "3."), which would shatter a chapter into dozens of
+# tiny one-line chunks and hurt retrieval. Numbered clauses stay inside their
+# chapter and get packed into ~500-token chunks by the chunker.
+_HEADING_RE = re.compile(
+    r"^(chapter\s+[ivxlcm]+\b"
+    r"|part\s+[ivxlcm]+\b"
+    r"|annex(ure)?\b"
+    r"|schedule\b)",
+    re.IGNORECASE,
+)
 
 
-def _get_converter():
-    global _converter
-    if _converter is None:
-        from docling.document_converter import DocumentConverter
-
-        _converter = DocumentConverter()
-    return _converter
+def _looks_like_heading(line: str) -> bool:
+    line = line.strip()
+    return bool(line) and len(line) <= 120 and bool(_HEADING_RE.match(line))
 
 
 def parse_pdf(pdf_path: str | Path, *, force: bool = False) -> str:
-    """Return the PDF as structured Markdown, using the on-disk cache."""
+    """Return the PDF as lightly-structured Markdown, using the on-disk cache."""
     pdf_path = Path(pdf_path)
     PARSED_DIR.mkdir(parents=True, exist_ok=True)
     out = PARSED_DIR / (pdf_path.stem + ".md")
     if out.exists() and not force:
         return out.read_text(encoding="utf-8")
 
-    result = _get_converter().convert(str(pdf_path))
-    markdown = result.document.export_to_markdown()
+    lines: list[str] = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            for raw in text.split("\n"):
+                if _looks_like_heading(raw):
+                    lines.append("")  # blank line -> new paragraph before heading
+                    lines.append(f"## {raw.strip()}")
+                    lines.append("")
+                else:
+                    lines.append(raw)
+
+    markdown = "\n".join(lines).strip()
     out.write_text(markdown, encoding="utf-8")
     return markdown
 
