@@ -13,6 +13,10 @@ dependencies = [
     "pydantic-settings>=2.6",
     "psycopg[binary]>=3.2",      # PostgreSQL driver (psycopg v3)
     "qdrant-client>=1.12",       # vector DB client
+    # ---- Phase 1: ingestion ----
+    "httpx>=0.27",               # HTTP client for the scraper
+    "beautifulsoup4>=4.12",      # HTML parsing of RBI listing pages
+    "lxml>=5.3",                 # fast HTML/XML parser backend for bs4
 ]
 
 [project.optional-dependencies]
