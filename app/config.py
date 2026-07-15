@@ -23,10 +23,11 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "compliance_chunks"
 
-    # Embeddings
-    embedding_model: str = "BAAI/bge-m3"
+    # Embeddings. Spec's intended model is BAAI/bge-m3 (1024-dim, multilingual),
+    # but it needs ~2.2GB disk; the MVP uses the small English model to fit.
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_device: str = "cpu"  # cpu | cuda
-    embedding_dim: int = 1024      # BGE-M3 dense vector size
+    embedding_dim: int = 384       # must match embedding_model's output size
 
     # LLM (answer generation). Swappable per PROJECT_SPEC.md §7 — never hardcoded.
     anthropic_api_key: str = ""

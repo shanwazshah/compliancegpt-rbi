@@ -33,16 +33,26 @@ _NAMESPACE = uuid.UUID("00000000-0000-0000-0000-00000000c0de")
 
 
 def _ensure_collection(client: QdrantClient) -> None:
-    """Create the Qdrant collection if it doesn't already exist."""
-    if not client.collection_exists(settings.qdrant_collection):
-        client.create_collection(
-            collection_name=settings.qdrant_collection,
-            vectors_config=qm.VectorParams(
-                size=settings.embedding_dim,
-                distance=qm.Distance.COSINE,  # cosine similarity on normalized vectors
-            ),
-        )
-        print(f"Created Qdrant collection '{settings.qdrant_collection}'")
+    """Create the Qdrant collection, recreating it if the vector size changed.
+
+    Recreating on a dimension mismatch means switching embedding models (e.g.
+    bge-small 384-dim <-> bge-m3 1024-dim) just works without a manual wipe.
+    """
+    name = settings.qdrant_collection
+    if client.collection_exists(name):
+        current = client.get_collection(name).config.params.vectors.size
+        if current == settings.embedding_dim:
+            return
+        print(f"Vector size changed ({current} -> {settings.embedding_dim}); recreating collection")
+        client.delete_collection(name)
+    client.create_collection(
+        collection_name=name,
+        vectors_config=qm.VectorParams(
+            size=settings.embedding_dim,
+            distance=qm.Distance.COSINE,  # cosine similarity on normalized vectors
+        ),
+    )
+    print(f"Created Qdrant collection '{name}' (dim={settings.embedding_dim})")
 
 
 def embed_document(client: QdrantClient, rec: dict) -> int:
@@ -60,7 +70,7 @@ def embed_document(client: QdrantClient, rec: dict) -> int:
         points.append(
             qm.PointStruct(
                 id=point_id,
-                vector=vec.tolist(),
+                vector=vec,  # embed_texts() already returns plain lists
                 payload={
                     "doc_number": rec["doc_number"],
                     "title": rec["title"],
