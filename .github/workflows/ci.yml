@@ -1,0 +1,57 @@
+name: CI
+
+# Runs on every push and pull request. Phase 0 gate = lint + test.
+# The eval-gate (Phase 3) will be added to this same pipeline later.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    # Ephemeral databases spun up just for this job, mirroring docker-compose.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: compliance
+          POSTGRES_PASSWORD: compliance
+          POSTGRES_DB: compliancegpt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U compliance -d compliancegpt"
+          --health-interval 5s --health-timeout 5s --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.4
+        ports:
+          - 6333:6333
+
+    env:
+      DATABASE_URL: postgresql://compliance:compliance@localhost:5432/compliancegpt
+      QDRANT_URL: http://localhost:6333
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Apply database migrations
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          for f in migrations/*.sql; do
+            psql "$DATABASE_URL" -f "$f"
+          done
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        run: pytest -q

@@ -1,0 +1,38 @@
+# One command boots the whole data layer:  docker compose up -d
+# - postgres : relational store for document metadata + supersession graph
+# - qdrant   : vector store for dense semantic search (added properly in Phase 1)
+#
+# Credentials here are for LOCAL DEV ONLY and must match DATABASE_URL in .env.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: compliance_postgres
+    environment:
+      POSTGRES_USER: compliance
+      POSTGRES_PASSWORD: compliance
+      POSTGRES_DB: compliancegpt
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Any *.sql here runs automatically the FIRST time the DB initializes.
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compliance -d compliancegpt"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: compliance_qdrant
+    ports:
+      - "6333:6333"   # REST/HTTP API
+      - "6334:6334"   # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  postgres_data:
+  qdrant_data:
