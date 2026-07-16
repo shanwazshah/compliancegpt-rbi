@@ -12,8 +12,29 @@ corpus with verifiable citations, and — crucially — knows which rules are
 
 ## Status
 
-🚧 In active development — **Phase 0 (setup) complete.** See build plan in
-[docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) §18.
+🚧 In active development — **Phase 1 (MVP) complete.** Full pipeline works end
+to end: scrape 30 RBI NBFC Master Directions → parse → chunk → embed → retrieve →
+generate cited answers. See build plan in [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) §18.
+
+**Phase 1 eval** (dense-only retrieval, 30-question golden set — full report in
+[evals/reports/](evals/reports/phase1_manual_eval.md)):
+
+| Metric | Result |
+|---|---|
+| Recall@5 | 92.3% |
+| MRR | 0.811 |
+| Citation accuracy (sample) | correct doc cited on all sampled answerable Qs |
+| Refusal on out-of-scope | correctly declined |
+
+The two retrieval misses were semantically-similar documents — motivating the
+hybrid (dense + keyword) retrieval planned for Phase 2.
+
+### Notable engineering decisions (MVP, all swappable)
+
+- **LLM:** free open-source Llama 3.3 70B via Groq (OpenAI-compatible), no vendor
+  lock-in — set `LLM_PROVIDER=anthropic` for Claude.
+- **PDF parser:** pdfplumber (Docling is the `[docling]` extra; it needs more RAM).
+- **Embeddings:** `bge-small-en-v1.5` (spec's `bge-m3` documented for higher-RAM/disk).
 
 ## Quickstart
 
