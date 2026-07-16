@@ -38,6 +38,7 @@ class QueryResponse(BaseModel):
     citations: list[Citation]
     retrieved_sources: list[RetrievedSource]
     reference_date_used: str
+    in_force_docs: int | None = None
     model: str | None
     degraded: bool
 

@@ -10,7 +10,9 @@ from __future__ import annotations
 from datetime import date
 
 from app.agent.nodes.generate import generate_answer
+from app.db.queries import get_connection
 from app.retrieval.retrieve import retrieve
+from app.retrieval.temporal_filter import in_force_doc_numbers
 
 
 def answer_query(
@@ -18,9 +20,22 @@ def answer_query(
     reference_date: str | None = None,
     k: int = 8,
     strategy: str = "dense",  # measured best on the golden set (see evals/ablation.py)
+    temporal: bool = True,
 ) -> dict:
-    """Answer one compliance question with citations and its retrieved sources."""
-    hits = retrieve(question, k=k, strategy=strategy)
+    """Answer one compliance question with citations and its retrieved sources.
+
+    When `temporal` is on, retrieval is pre-filtered to the documents in force at
+    `reference_date` (default = today), so the system never cites a document that
+    was superseded (or not yet issued) as of that date.
+    """
+    ref_date = date.fromisoformat(reference_date) if reference_date else date.today()
+
+    allowed: set[str] | None = None
+    if temporal:
+        with get_connection() as conn:
+            allowed = in_force_doc_numbers(conn, ref_date)
+
+    hits = retrieve(question, k=k, strategy=strategy, allowed_doc_numbers=allowed)
     retrieved_sources = [
         {
             "doc_number": h["doc_number"],
@@ -57,7 +72,8 @@ def answer_query(
         "answer": answer,
         "citations": citations,
         "retrieved_sources": retrieved_sources,
-        "reference_date_used": reference_date or date.today().isoformat(),
+        "reference_date_used": ref_date.isoformat(),
+        "in_force_docs": len(allowed) if allowed is not None else None,
         "model": model,
         "degraded": degraded,
     }

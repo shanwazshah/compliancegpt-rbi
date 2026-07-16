@@ -23,19 +23,27 @@ def _chunk_key(hit: dict) -> tuple:
     return (hit["doc_number"], hit["chunk_index"])
 
 
-def candidate_pool(query: str, candidates: int = 30) -> list[dict]:
+def candidate_pool(
+    query: str, candidates: int = 30, allowed_doc_numbers: set[str] | None = None
+) -> list[dict]:
     """Deduplicated union of dense + BM25 candidates (for a reranker to score)."""
     pool: dict[tuple, dict] = {}
-    for ranked_list in (dense_search(query, k=candidates), bm25_search(query, k=candidates)):
+    lists = (
+        dense_search(query, k=candidates, allowed_doc_numbers=allowed_doc_numbers),
+        bm25_search(query, k=candidates, allowed_doc_numbers=allowed_doc_numbers),
+    )
+    for ranked_list in lists:
         for hit in ranked_list:
             pool.setdefault(_chunk_key(hit), hit)
     return list(pool.values())
 
 
-def hybrid_search(query: str, k: int = 8, candidates: int = 30) -> list[dict]:
+def hybrid_search(
+    query: str, k: int = 8, candidates: int = 30, allowed_doc_numbers: set[str] | None = None
+) -> list[dict]:
     """Fuse dense + BM25 candidate lists via RRF; return top-k chunks."""
-    dense = dense_search(query, k=candidates)
-    sparse = bm25_search(query, k=candidates)
+    dense = dense_search(query, k=candidates, allowed_doc_numbers=allowed_doc_numbers)
+    sparse = bm25_search(query, k=candidates, allowed_doc_numbers=allowed_doc_numbers)
 
     rrf: dict[tuple, float] = {}
     payloads: dict[tuple, dict] = {}

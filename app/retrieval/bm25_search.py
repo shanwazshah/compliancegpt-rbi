@@ -47,11 +47,25 @@ def _build_index() -> tuple[BM25Okapi, list[dict]]:
     return BM25Okapi(corpus), payloads
 
 
-def bm25_search(query: str, k: int = 8) -> list[dict]:
-    """Return the top-k chunks by BM25 score (payload dicts + score)."""
+def bm25_search(
+    query: str, k: int = 8, allowed_doc_numbers: set[str] | None = None
+) -> list[dict]:
+    """Return the top-k chunks by BM25 score (payload dicts + score).
+
+    When allowed_doc_numbers is given, only chunks from those documents (the
+    temporal in-force set) are returned.
+    """
     global _bm25, _payloads
     if _bm25 is None:
         _bm25, _payloads = _build_index()
     scores = _bm25.get_scores(_tokenize(query))
-    top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
-    return [{"score": float(scores[i]), **_payloads[i]} for i in top]
+    order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    results = []
+    for i in order:
+        doc_number = _payloads[i]["doc_number"]
+        if allowed_doc_numbers is not None and doc_number not in allowed_doc_numbers:
+            continue
+        results.append({"score": float(scores[i]), **_payloads[i]})
+        if len(results) >= k:
+            break
+    return results
