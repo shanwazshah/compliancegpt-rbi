@@ -41,6 +41,8 @@ class QueryResponse(BaseModel):
     in_force_docs: int | None = None
     model: str | None
     degraded: bool
+    verified_citations: bool = True
+    hallucinated_citations: list[str] = []
 
 
 def _check_postgres() -> bool:
@@ -88,10 +90,14 @@ def health() -> dict:
 
 @router.post("/query", response_model=QueryResponse)
 def query(req: QueryRequest) -> QueryResponse:
-    """Answer a compliance question with citations (temporally filtered)."""
-    from app.agent.pipeline import answer_query
+    """Answer a compliance question via the LangGraph agent.
 
-    result = answer_query(req.question, req.reference_date)
+    classify -> resolve_temporal -> retrieve -> generate -> verify -> respond,
+    with out-of-scope questions routed to a refusal.
+    """
+    from app.agent.graph import run_agent
+
+    result = run_agent(req.question, req.reference_date)
     return QueryResponse(**result)
 
 
