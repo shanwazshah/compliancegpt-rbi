@@ -152,12 +152,26 @@ def build_agent():
 
 
 _agent = None
+_cache = None
 
 
-def run_agent(question: str, reference_date: str | None = None) -> dict:
-    """Run the full agent and return the response payload."""
-    global _agent
+def run_agent(question: str, reference_date: str | None = None, use_cache: bool = True) -> dict:
+    """Run the full agent and return the response payload (semantic-cached)."""
+    global _agent, _cache
     if _agent is None:
+        from app.agent.cache import SemanticCache
+
         _agent = build_agent()
+        _cache = SemanticCache()
+
+    if use_cache:
+        hit = _cache.get(question, reference_date)
+        if hit is not None:
+            return {**hit, "cached": True}
+
     final = _agent.invoke({"question": question, "reference_date": reference_date})
-    return final["response"]
+    response = final["response"]
+    response["cached"] = False
+    if use_cache and not response.get("degraded"):
+        _cache.put(question, reference_date, response)
+    return response

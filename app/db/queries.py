@@ -82,6 +82,18 @@ def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
         cur.execute(sql, rec)
 
 
+def list_documents(conn: psycopg.Connection) -> list[dict]:
+    """Return all documents (id, number, title, status) for pickers/lookup."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, doc_number, title, status FROM documents ORDER BY doc_number"
+        )
+        return [
+            {"id": str(r[0]), "doc_number": r[1], "title": r[2], "status": r[3]}
+            for r in cur.fetchall()
+        ]
+
+
 def get_document(conn: psycopg.Connection, doc_id: str) -> dict | None:
     """Return one document as a dict, or None if not found."""
     sql = """

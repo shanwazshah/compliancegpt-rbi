@@ -44,6 +44,7 @@ class QueryResponse(BaseModel):
     degraded: bool
     verified_citations: bool = True
     hallucinated_citations: list[str] = []
+    cached: bool = False
 
 
 def _check_postgres() -> bool:
@@ -134,6 +135,15 @@ def _log_query(req: QueryRequest, result: dict, latency_ms: int) -> None:
             )
     except Exception:
         pass
+
+
+@router.get("/documents")
+def documents_list() -> list[dict]:
+    """List all documents (for pickers and doc_number -> id lookup)."""
+    from app.db.queries import get_connection, list_documents
+
+    with get_connection() as conn:
+        return list_documents(conn)
 
 
 @router.get("/documents/{doc_id}")
