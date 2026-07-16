@@ -19,7 +19,9 @@ _client: QdrantClient | None = None
 def _get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=settings.qdrant_url)
+        # Generous timeout: the default is tight and a busy/cold Qdrant can
+        # exceed it, surfacing as a ReadTimeout mid-query.
+        _client = QdrantClient(url=settings.qdrant_url, timeout=30)
     return _client
 
 

@@ -29,7 +29,8 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _build_index() -> tuple[BM25Okapi, list[dict]]:
-    client = QdrantClient(url=settings.qdrant_url)
+    # Generous timeout: scrolling the whole collection can be slow on a cold start.
+    client = QdrantClient(url=settings.qdrant_url, timeout=60)
     payloads: list[dict] = []
     offset = None
     while True:

@@ -10,14 +10,25 @@ from __future__ import annotations
 from app.config import settings
 
 
-def complete(system: str, user: str, max_tokens: int = 1024, temperature: float = 0.2) -> str:
-    """Return the model's text completion for a system+user prompt."""
+def complete(
+    system: str,
+    user: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.2,
+    model: str | None = None,
+) -> str:
+    """Return the model's text completion for a system+user prompt.
+
+    `model` overrides settings.llm_model — used e.g. by the eval harness to judge
+    with a different (independent) model than the one that generated the answer.
+    """
+    model = model or settings.llm_model
     if settings.llm_provider.lower() == "anthropic":
         import anthropic
 
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
         message = client.messages.create(
-            model=settings.llm_model,
+            model=model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
@@ -28,7 +39,7 @@ def complete(system: str, user: str, max_tokens: int = 1024, temperature: float 
 
     client = OpenAI(api_key=settings.llm_api_key or "not-needed", base_url=settings.llm_base_url)
     resp = client.chat.completions.create(
-        model=settings.llm_model,
+        model=model,
         max_tokens=max_tokens,
         temperature=temperature,
         messages=[
