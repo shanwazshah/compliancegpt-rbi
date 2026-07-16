@@ -10,12 +10,17 @@ from __future__ import annotations
 from datetime import date
 
 from app.agent.nodes.generate import generate_answer
-from app.retrieval.dense_search import dense_search
+from app.retrieval.retrieve import retrieve
 
 
-def answer_query(question: str, reference_date: str | None = None, k: int = 8) -> dict:
+def answer_query(
+    question: str,
+    reference_date: str | None = None,
+    k: int = 8,
+    strategy: str = "hybrid",
+) -> dict:
     """Answer one compliance question with citations and its retrieved sources."""
-    hits = dense_search(question, k=k)
+    hits = retrieve(question, k=k, strategy=strategy)
     retrieved_sources = [
         {
             "doc_number": h["doc_number"],

@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 from app.agent.pipeline import answer_query
-from app.retrieval.dense_search import dense_search
+from app.retrieval.retrieve import retrieve
 
 GOLDEN = Path("evals") / "golden_dataset.jsonl"
 REPORT_DIR = Path("evals") / "reports"
@@ -28,24 +28,36 @@ GEN_SAMPLE = 4  # how many rows to run full generation on (limits LLM calls)
 
 
 def _load_golden() -> list[dict]:
-    return [json.loads(line) for line in GOLDEN.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = GOLDEN.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def _answerable_rows(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r.get("expected_doc_numbers")]
 
 
 def _retrieval_metrics(rows: list[dict]) -> tuple[float, float, list[dict]]:
     """Recall@K and MRR over rows that expect at least one document."""
-    answerable = [r for r in rows if r.get("expected_doc_numbers")]
+    answerable = _answerable_rows(rows)
     hits = 0
     reciprocal_ranks = 0.0
     details = []
     for r in answerable:
         expected = set(r["expected_doc_numbers"])
-        results = dense_search(r["question"], k=K)
+        results = retrieve(r["question"], k=K, strategy="hybrid")
         ranked = [h["doc_number"] for h in results]
         rank = next((i for i, dn in enumerate(ranked, 1) if dn in expected), None)
         if rank:
             hits += 1
             reciprocal_ranks += 1.0 / rank
-        details.append({"question": r["question"], "expected": sorted(expected), "rank": rank, "top": ranked[0]})
+        details.append(
+            {
+                "question": r["question"],
+                "expected": sorted(expected),
+                "rank": rank,
+                "top": ranked[0],
+            }
+        )
     n = len(answerable)
     return (hits / n if n else 0.0), (reciprocal_ranks / n if n else 0.0), details
 
@@ -81,8 +93,8 @@ def main() -> None:
         "# Phase 1 — Manual Eval Report",
         "",
         f"- Date: {date.today().isoformat()}",
-        "- Strategy: dense-only retrieval (bge-small-en-v1.5, 384-dim) + Groq llama-3.3-70b generation",
-        f"- Golden set: {len(rows)} rows ({len([r for r in rows if r.get('expected_doc_numbers')])} answerable)",
+        "- Strategy: hybrid retrieval (bge-small-en-v1.5 + BM25) + Groq llama-3.3-70b generation",
+        f"- Golden set: {len(rows)} rows ({len(_answerable_rows(rows))} answerable)",
         "",
         "## Retrieval metrics (answerable rows)",
         "",
@@ -100,7 +112,8 @@ def main() -> None:
     for g in gen_results:
         mark = "✅" if g["citation_ok"] else "❌"
         lines.append(f"### {mark} {g['question']}")
-        lines.append(f"- expected: {g['expected'] or '(none — refusal expected)'} · cited: {g['cited'] or '(none)'}")
+        exp = g["expected"] or "(none — refusal expected)"
+        lines.append(f"- expected: {exp} · cited: {g['cited'] or '(none)'}")
         lines.append(f"- answer: {g['answer'][:400]}")
         lines.append("")
 
