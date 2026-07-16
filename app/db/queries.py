@@ -68,6 +68,20 @@ def count_documents(conn: psycopg.Connection) -> int:
         return cur.fetchone()[0]
 
 
+def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
+    """Persist one query log row (query_text must already be PII-redacted)."""
+    sql = """
+        INSERT INTO query_logs (query_text, reference_date, in_force_docs,
+                                cited_doc_numbers, answer_text, degraded,
+                                verified_citations, latency_ms)
+        VALUES (%(query_text)s, %(reference_date)s, %(in_force_docs)s,
+                %(cited_doc_numbers)s, %(answer_text)s, %(degraded)s,
+                %(verified_citations)s, %(latency_ms)s)
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, rec)
+
+
 def get_document(conn: psycopg.Connection, doc_id: str) -> dict | None:
     """Return one document as a dict, or None if not found."""
     sql = """

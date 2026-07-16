@@ -98,12 +98,42 @@ def query(req: QueryRequest) -> QueryResponse:
     """Answer a compliance question via the LangGraph agent.
 
     classify -> resolve_temporal -> retrieve -> generate -> verify -> respond,
-    with out-of-scope questions routed to a refusal.
+    with out-of-scope questions routed to a refusal. Each call is logged (with the
+    question PII-redacted) for observability.
     """
+    import time
+
     from app.agent.graph import run_agent
 
+    start = time.monotonic()
     result = run_agent(req.question, req.reference_date)
+    latency_ms = int((time.monotonic() - start) * 1000)
+    _log_query(req, result, latency_ms)
     return QueryResponse(**result)
+
+
+def _log_query(req: QueryRequest, result: dict, latency_ms: int) -> None:
+    """Best-effort query logging — never let logging break the response."""
+    from app.db.queries import get_connection, insert_query_log
+    from app.observability.redaction import redact
+
+    try:
+        with get_connection() as conn:
+            insert_query_log(
+                conn,
+                {
+                    "query_text": redact(req.question),
+                    "reference_date": req.reference_date,
+                    "in_force_docs": result.get("in_force_docs"),
+                    "cited_doc_numbers": [c["doc_number"] for c in result.get("citations", [])],
+                    "answer_text": result.get("answer"),
+                    "degraded": result.get("degraded"),
+                    "verified_citations": result.get("verified_citations"),
+                    "latency_ms": latency_ms,
+                },
+            )
+    except Exception:
+        pass
 
 
 @router.get("/documents/{doc_id}")
