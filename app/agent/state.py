@@ -18,8 +18,9 @@ class AgentState(TypedDict, total=False):
     # resolve_temporal
     ref_date_iso: str
     allowed_doc_numbers: set[str]
-    # retrieve / generate
+    # retrieve / expand / generate
     hits: list[dict]
+    contexts: list[dict]
     answer: str
     model: str | None
     degraded: bool

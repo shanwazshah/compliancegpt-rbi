@@ -58,7 +58,10 @@ def _ensure_collection(client: QdrantClient) -> None:
 def embed_document(client: QdrantClient, rec: dict) -> int:
     """Parse -> chunk -> embed -> upsert one document. Returns #child chunks."""
     md = parse_pdf(rec["pdf_path"])
-    children = [c for c in chunk_markdown(md) if not c.is_parent]
+    all_chunks = chunk_markdown(md)
+    # parent (section) text, keyed by the parent chunk's index — for small-to-big.
+    parent_text_by_index = {c.chunk_index: c.text for c in all_chunks if c.is_parent}
+    children = [c for c in all_chunks if not c.is_parent]
     if not children:
         return 0
 
@@ -80,7 +83,10 @@ def embed_document(client: QdrantClient, rec: dict) -> int:
                     "entity_categories": ["NBFC"],
                     "section_heading": chunk.section_heading,
                     "chunk_index": chunk.chunk_index,
+                    "parent_index": chunk.parent_index,
                     "text": chunk.text,
+                    # Fuller section text for parent expansion at generation time.
+                    "parent_text": parent_text_by_index.get(chunk.parent_index, chunk.text),
                 },
             )
         )

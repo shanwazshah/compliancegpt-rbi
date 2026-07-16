@@ -17,6 +17,7 @@ from datetime import date
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.nodes.classify import classify_query
+from app.agent.nodes.expand import expand_context
 from app.agent.nodes.generate import generate_answer
 from app.agent.nodes.verify import verify_citations
 from app.agent.state import AgentState
@@ -52,9 +53,13 @@ def _retrieve(state: AgentState) -> dict:
     return {"hits": hits}
 
 
+def _expand(state: AgentState) -> dict:
+    return {"contexts": expand_context(state["hits"])}
+
+
 def _generate(state: AgentState) -> dict:
     try:
-        gen = generate_answer(state["question"], state["hits"])
+        gen = generate_answer(state["question"], state.get("contexts") or state["hits"])
         return {"answer": gen["answer"], "model": gen["model"], "degraded": False}
     except Exception as exc:  # graceful degradation (spec §15)
         return {
@@ -132,6 +137,7 @@ def build_agent():
     g.add_node("classify", _classify)
     g.add_node("resolve_temporal", _resolve_temporal)
     g.add_node("retrieve", _retrieve)
+    g.add_node("expand", _expand)
     g.add_node("generate", _generate)
     g.add_node("verify", _verify)
     g.add_node("respond", _respond)
@@ -143,7 +149,8 @@ def build_agent():
         {"resolve_temporal": "resolve_temporal", "refuse": "refuse"},
     )
     g.add_edge("resolve_temporal", "retrieve")
-    g.add_edge("retrieve", "generate")
+    g.add_edge("retrieve", "expand")
+    g.add_edge("expand", "generate")
     g.add_edge("generate", "verify")
     g.add_edge("verify", "respond")
     g.add_edge("respond", END)
