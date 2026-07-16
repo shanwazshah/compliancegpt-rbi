@@ -1,0 +1,51 @@
+# Production stack: app + Postgres + Qdrant, one command on any host with ~2GB RAM.
+#   LLM_API_KEY=gsk_...  docker compose -f docker-compose.prod.yml up -d --build
+# Then seed the corpus once (see DEPLOY.md). The app reaches the databases by
+# their service names (postgres, qdrant), not localhost.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: compliance_postgres
+    environment:
+      POSTGRES_USER: compliance
+      POSTGRES_PASSWORD: compliance
+      POSTGRES_DB: compliancegpt
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U compliance -d compliancegpt"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: compliance_qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  app:
+    build: .
+    container_name: compliance_app
+    environment:
+      DATABASE_URL: postgresql://compliance:compliance@postgres:5432/compliancegpt
+      QDRANT_URL: http://qdrant:6333
+      LLM_PROVIDER: groq
+      LLM_MODEL: llama-3.3-70b-versatile
+      LLM_BASE_URL: https://api.groq.com/openai/v1
+      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY (Groq gsk_...) in the environment}
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      EMBEDDING_DIM: "384"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  qdrant_data:
