@@ -16,18 +16,26 @@ corpus with verifiable citations, and — crucially — knows which rules are
 to end: scrape 30 RBI NBFC Master Directions → parse → chunk → embed → retrieve →
 generate cited answers. See build plan in [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) §18.
 
-**Phase 1 eval** (dense-only retrieval, 30-question golden set — full report in
-[evals/reports/](evals/reports/phase1_manual_eval.md)):
+**Retrieval ablation** (30-question golden set, K=5 — full report in
+[evals/reports/](evals/reports/ablation_retrieval.md)). Real measured numbers,
+reported honestly:
 
-| Metric | Result |
-|---|---|
-| Recall@5 | 92.3% |
-| MRR | 0.811 |
-| Citation accuracy (sample) | correct doc cited on all sampled answerable Qs |
-| Refusal on out-of-scope | correctly declined |
+| Strategy | Recall@5 | MRR |
+|---|---|---|
+| **dense** | **92.3%** | **0.811** |
+| bm25 | 92.3% | 0.655 |
+| hybrid (dense+BM25, RRF) | 92.3% | 0.728 |
+| hybrid + rerank | 88.5% | 0.735 |
 
-The two retrieval misses were semantically-similar documents — motivating the
-hybrid (dense + keyword) retrieval planned for Phase 2.
+**Honest finding:** on this clean corpus (each document is a distinct topic),
+dense retrieval is already near-ceiling, and the advanced strategies did not beat
+it in aggregate. The ablation is still valuable — it shows *why*: BM25 individually
+rescued both of dense's misses (precise terms like "capital adequacy"), and the
+cross-encoder reranker pulled one from unranked to **rank 1** — proving the
+mechanism — but the small out-of-domain reranker misjudged two legal queries,
+and the golden set lacks the regulation-identifier queries where lexical search
+wins most. Generation quality (citations, refusals, disclaimer) is verified
+separately in the Phase 1 report.
 
 ### Notable engineering decisions (MVP, all swappable)
 

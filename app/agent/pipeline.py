@@ -17,7 +17,7 @@ def answer_query(
     question: str,
     reference_date: str | None = None,
     k: int = 8,
-    strategy: str = "hybrid",
+    strategy: str = "dense",  # measured best on the golden set (see evals/ablation.py)
 ) -> dict:
     """Answer one compliance question with citations and its retrieved sources."""
     hits = retrieve(question, k=k, strategy=strategy)

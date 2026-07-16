@@ -19,7 +19,7 @@ from app.retrieval.retrieve import retrieve
 GOLDEN = Path("evals") / "golden_dataset.jsonl"
 REPORT = Path("evals") / "reports" / "ablation_retrieval.md"
 K = 5
-STRATEGIES = ("dense", "bm25", "hybrid")
+STRATEGIES = ("dense", "bm25", "hybrid", "hybrid_rerank")
 
 
 def _answerable() -> list[dict]:
@@ -48,7 +48,7 @@ def main() -> None:
     results = {s: _metrics(rows, s) for s in STRATEGIES}
 
     lines = [
-        "# Retrieval Ablation — dense vs BM25 vs hybrid",
+        "# Retrieval Ablation — dense vs BM25 vs hybrid vs hybrid+rerank",
         "",
         f"- Date: {date.today().isoformat()}",
         f"- Golden set: {len(rows)} answerable questions · K={K}",

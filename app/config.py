@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     embedding_device: str = "cpu"  # cpu | cuda
     embedding_dim: int = 384       # must match embedding_model's output size
 
+    # Reranker (cross-encoder). Spec's intended model is BAAI/bge-reranker-v2-m3
+    # (~2.2GB); the MVP uses a small MiniLM cross-encoder (~80MB) to fit disk.
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
     # LLM (answer generation). Swappable per PROJECT_SPEC.md §7 — never hardcoded.
     # Default = Groq (free, hosted, open-source Llama). Any OpenAI-compatible
     # backend works by changing llm_base_url + llm_model (Ollama, OpenRouter, …).

@@ -23,6 +23,15 @@ def _chunk_key(hit: dict) -> tuple:
     return (hit["doc_number"], hit["chunk_index"])
 
 
+def candidate_pool(query: str, candidates: int = 30) -> list[dict]:
+    """Deduplicated union of dense + BM25 candidates (for a reranker to score)."""
+    pool: dict[tuple, dict] = {}
+    for ranked_list in (dense_search(query, k=candidates), bm25_search(query, k=candidates)):
+        for hit in ranked_list:
+            pool.setdefault(_chunk_key(hit), hit)
+    return list(pool.values())
+
+
 def hybrid_search(query: str, k: int = 8, candidates: int = 30) -> list[dict]:
     """Fuse dense + BM25 candidate lists via RRF; return top-k chunks."""
     dense = dense_search(query, k=candidates)
