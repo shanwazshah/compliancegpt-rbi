@@ -88,8 +88,47 @@ def health() -> dict:
 
 @router.post("/query", response_model=QueryResponse)
 def query(req: QueryRequest) -> QueryResponse:
-    """Answer a compliance question with citations (Phase 1: dense retrieval)."""
+    """Answer a compliance question with citations (temporally filtered)."""
     from app.agent.pipeline import answer_query
 
     result = answer_query(req.question, req.reference_date)
     return QueryResponse(**result)
+
+
+@router.get("/documents/{doc_id}")
+def document_detail(doc_id: str) -> dict:
+    """Document detail + its supersession history (predecessors & successors)."""
+    from fastapi import HTTPException
+
+    from app.db.queries import get_connection, get_document, supersession_history
+
+    with get_connection() as conn:
+        doc = get_document(conn, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        doc["supersession"] = supersession_history(conn, doc_id)
+        return doc
+
+
+@router.get("/documents/{doc_id}/supersession-graph")
+def supersession_graph(doc_id: str) -> dict:
+    """Graph nodes/edges around this document, for visualization."""
+    from fastapi import HTTPException
+
+    from app.db.queries import get_connection, get_document, supersession_history
+
+    with get_connection() as conn:
+        doc = get_document(conn, doc_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        history = supersession_history(conn, doc_id)
+
+    nodes = {doc_id: {"id": doc_id, "doc_number": doc["doc_number"], "title": doc["title"]}}
+    edges = []
+    for p in history["predecessors"]:
+        nodes[p["id"]] = {"id": p["id"], "doc_number": p["doc_number"], "title": p["title"]}
+        edges.append({"from": p["id"], "to": doc_id, "relation": p["relation_type"]})
+    for s in history["successors"]:
+        nodes[s["id"]] = {"id": s["id"], "doc_number": s["doc_number"], "title": s["title"]}
+        edges.append({"from": doc_id, "to": s["id"], "relation": s["relation_type"]})
+    return {"nodes": list(nodes.values()), "edges": edges}

@@ -66,3 +66,56 @@ def count_documents(conn: psycopg.Connection) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM documents")
         return cur.fetchone()[0]
+
+
+def get_document(conn: psycopg.Connection, doc_id: str) -> dict | None:
+    """Return one document as a dict, or None if not found."""
+    sql = """
+        SELECT id, source_regulator, doc_type, doc_number, title,
+               issue_date, status, source_url, entity_categories
+        FROM documents WHERE id = %s
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (doc_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [c.name for c in cur.description]
+        doc = dict(zip(cols, row))
+        doc["id"] = str(doc["id"])
+        doc["issue_date"] = doc["issue_date"].isoformat() if doc["issue_date"] else None
+        return doc
+
+
+def supersession_history(conn: psycopg.Connection, doc_id: str) -> dict:
+    """Return this document's predecessors and successors (one hop each)."""
+    predecessors_sql = """
+        SELECT d.id, d.doc_number, d.title, e.relation_type, e.effective_date
+        FROM supersession_edges e
+        JOIN documents d ON d.id = e.predecessor_doc_id
+        WHERE e.successor_doc_id = %s
+    """
+    successors_sql = """
+        SELECT d.id, d.doc_number, d.title, e.relation_type, e.effective_date
+        FROM supersession_edges e
+        JOIN documents d ON d.id = e.successor_doc_id
+        WHERE e.predecessor_doc_id = %s
+    """
+
+    def _rows(sql: str) -> list[dict]:
+        with conn.cursor() as cur:
+            cur.execute(sql, (doc_id,))
+            out = []
+            for r in cur.fetchall():
+                out.append(
+                    {
+                        "id": str(r[0]),
+                        "doc_number": r[1],
+                        "title": r[2],
+                        "relation_type": r[3],
+                        "effective_date": r[4].isoformat() if r[4] else None,
+                    }
+                )
+            return out
+
+    return {"predecessors": _rows(predecessors_sql), "successors": _rows(successors_sql)}
