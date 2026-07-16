@@ -30,9 +30,14 @@ class Settings(BaseSettings):
     embedding_dim: int = 384       # must match embedding_model's output size
 
     # LLM (answer generation). Swappable per PROJECT_SPEC.md §7 — never hardcoded.
-    anthropic_api_key: str = ""
-    llm_provider: str = "anthropic"       # anthropic | openai
-    llm_model: str = "claude-sonnet-4-6"  # matches .env.example
+    # Default = Groq (free, hosted, open-source Llama). Any OpenAI-compatible
+    # backend works by changing llm_base_url + llm_model (Ollama, OpenRouter, …).
+    # Set llm_provider="anthropic" to use Claude instead.
+    llm_provider: str = "groq"            # groq | anthropic | openai | ollama | ...
+    llm_model: str = "llama-3.3-70b-versatile"
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_api_key: str = ""                 # Groq key (gsk_...) via LLM_API_KEY
+    anthropic_api_key: str = ""           # only used when llm_provider="anthropic"
     groundedness_threshold: float = 0.7
 
     # App

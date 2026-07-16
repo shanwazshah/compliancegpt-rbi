@@ -19,7 +19,8 @@ dependencies = [
     "lxml>=5.3",                 # fast HTML/XML parser backend for bs4
     "pdfplumber>=0.11",          # PDF text extraction (low-memory MVP parser)
     "sentence-transformers>=3.0",# BGE-M3 embeddings
-    "anthropic>=0.40",           # LLM answer generation
+    "openai>=1.40",              # LLM generation via any OpenAI-compatible API (Groq default)
+    "anthropic>=0.40",           # optional: Claude provider path
     # ---- Phase 1: serving/UI ----
     "streamlit>=1.38",           # minimal chat UI
 ]
