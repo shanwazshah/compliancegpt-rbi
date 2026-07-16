@@ -1,0 +1,60 @@
+name: Corpus drift check
+
+# Scheduled ingestion check (spec §15): has RBI published or withdrawn NBFC
+# Master Directions since our last ingest? Runs weekly and on demand.
+# It only scrapes the index (no PDFs, no database), so it's cheap in CI.
+# Drift or a failed scrape opens an issue — failures are visible, not silent.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Only what the checker needs — not the ML stack.
+      - name: Install scrape deps
+        run: pip install httpx beautifulsoup4 lxml pydantic pydantic-settings
+
+      - name: Check for corpus drift
+        id: drift
+        continue-on-error: true
+        run: python -m ingestion.check_for_updates
+
+      - name: Open an issue if drift or scrape failure
+        if: steps.drift.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Corpus drift detected (${new Date().toISOString().slice(0,10)})`,
+              body: [
+                'The scheduled RBI corpus check reported drift or a scrape failure.',
+                '',
+                `Run log: ${run}`,
+                '',
+                'If RBI published or withdrew Master Directions, re-ingest and refresh the snapshot:',
+                '```bash',
+                'python -m ingestion.scrapers.rbi_master_directions',
+                'python -m ingestion.load_documents',
+                'python -m ingestion.parsing.pdf_to_structured',
+                'python -m ingestion.indexing.embed_and_upsert',
+                'python -m ingestion.check_for_updates --update-snapshot',
+                '```',
+              ].join('\n'),
+              labels: ['ingestion'],
+            });

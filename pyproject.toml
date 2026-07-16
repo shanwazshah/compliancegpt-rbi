@@ -4,24 +4,27 @@ version = "0.0.1"
 description = "Temporally-aware agentic RAG over RBI/SEBI regulatory documents"
 requires-python = ">=3.11"
 
-# Phase 0 dependencies only. Heavy ML libraries (torch, sentence-transformers,
-# docling) are deliberately deferred to Phase 1 so early setup stays fast.
 dependencies = [
+    # ---- serving plane ----
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "psycopg[binary]>=3.2",      # PostgreSQL driver (psycopg v3)
     "qdrant-client>=1.12",       # vector DB client
-    # ---- Phase 1: ingestion ----
+    # ---- ingestion plane ----
     "httpx>=0.27",               # HTTP client for the scraper
     "beautifulsoup4>=4.12",      # HTML parsing of RBI listing pages
     "lxml>=5.3",                 # fast HTML/XML parser backend for bs4
-    "pdfplumber>=0.11",          # PDF text extraction (low-memory MVP parser)
-    "sentence-transformers>=3.0",# BGE-M3 embeddings
-    "openai>=1.40",              # LLM generation via any OpenAI-compatible API (Groq default)
+    "pdfplumber>=0.11",          # PDF text extraction (low-memory parser)
+    # ---- retrieval ----
+    "sentence-transformers>=3.0",# embeddings + cross-encoder reranker
+    "rank-bm25>=0.2",            # BM25 lexical retrieval (hybrid + RRF)
+    # ---- agent + LLM ----
+    "langgraph>=0.2",            # agent state machine (classify->...->respond)
+    "openai>=1.40",              # LLM via any OpenAI-compatible API (Groq default)
     "anthropic>=0.40",           # optional: Claude provider path
-    # ---- Phase 1: serving/UI ----
+    # ---- UI ----
     "streamlit>=1.38",           # minimal chat UI
 ]
 

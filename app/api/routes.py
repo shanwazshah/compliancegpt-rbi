@@ -44,6 +44,8 @@ class QueryResponse(BaseModel):
     degraded: bool
     verified_citations: bool = True
     hallucinated_citations: list[str] = []
+    groundedness: float | None = None   # 0..1 support of answer by context
+    low_confidence: bool = False        # groundedness < threshold
     cached: bool = False
 
 

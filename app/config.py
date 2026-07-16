@@ -23,15 +23,17 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "compliance_chunks"
 
-    # Embeddings. Spec's intended model is BAAI/bge-m3 (1024-dim, multilingual),
-    # but it needs ~2.2GB disk; the MVP uses the small English model to fit.
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Embeddings — the spec's model: BGE-M3 (1024-dim, multilingual, ~2.2GB).
+    # Low-disk/low-CPU fallback: "BAAI/bge-small-en-v1.5" with EMBEDDING_DIM=384.
+    # Change model and dim TOGETHER or Qdrant's vector size won't match (the
+    # collection auto-recreates on a dim change — see embed_and_upsert).
+    embedding_model: str = "BAAI/bge-m3"
     embedding_device: str = "cpu"  # cpu | cuda
-    embedding_dim: int = 384       # must match embedding_model's output size
+    embedding_dim: int = 1024      # must match embedding_model's output size
 
-    # Reranker (cross-encoder). Spec's intended model is BAAI/bge-reranker-v2-m3
-    # (~2.2GB); the MVP uses a small MiniLM cross-encoder (~80MB) to fit disk.
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Reranker (cross-encoder) — the spec's model: bge-reranker-v2-m3 (~2.2GB).
+    # Low-disk fallback: "cross-encoder/ms-marco-MiniLM-L-6-v2" (~80MB).
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
     # LLM (answer generation). Swappable per PROJECT_SPEC.md §7 — never hardcoded.
     # Default = Groq (free, hosted, open-source Llama). Any OpenAI-compatible

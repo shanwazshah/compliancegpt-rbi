@@ -96,7 +96,9 @@ def embed_document(client: QdrantClient, rec: dict) -> int:
 
 def index_all() -> None:
     records = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    client = QdrantClient(url=settings.qdrant_url)
+    # Generous timeout: collection create/delete and batch upserts can exceed the
+    # client default on a busy or cold Qdrant (a ReadTimeout here killed a run).
+    client = QdrantClient(url=settings.qdrant_url, timeout=120)
     _ensure_collection(client)
 
     total_chunks = 0

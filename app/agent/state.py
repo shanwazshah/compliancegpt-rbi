@@ -28,5 +28,8 @@ class AgentState(TypedDict, total=False):
     citations: list[dict]
     verified: bool
     hallucinated: list[str]
+    # groundedness (spec §11.8)
+    groundedness: float | None
+    low_confidence: bool
     # respond
     response: dict

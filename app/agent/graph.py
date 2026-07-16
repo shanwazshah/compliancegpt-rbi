@@ -19,8 +19,10 @@ from langgraph.graph import END, START, StateGraph
 from app.agent.nodes.classify import classify_query
 from app.agent.nodes.expand import expand_context
 from app.agent.nodes.generate import generate_answer
+from app.agent.nodes.groundedness import compute_groundedness
 from app.agent.nodes.verify import verify_citations
 from app.agent.state import AgentState
+from app.config import settings
 from app.db.queries import get_connection
 from app.retrieval.retrieve import retrieve
 from app.retrieval.temporal_filter import in_force_doc_numbers
@@ -83,6 +85,20 @@ def _verify(state: AgentState) -> dict:
     return {"verified": ok, "hallucinated": hallucinated, "citations": citations}
 
 
+def _groundedness(state: AgentState) -> dict:
+    """Score answer support against context; flag low-confidence (spec §11.8)."""
+    if state.get("degraded"):
+        # A failed generation isn't "ungrounded" — don't score it (that would
+        # report an outage as a quality problem).
+        return {"groundedness": None, "low_confidence": False}
+    contexts = state.get("contexts") or state.get("hits") or []
+    score = compute_groundedness(state["answer"], contexts)
+    return {
+        "groundedness": score,
+        "low_confidence": score < settings.groundedness_threshold,
+    }
+
+
 def _respond(state: AgentState) -> dict:
     allowed = state.get("allowed_doc_numbers")
     sources = [
@@ -94,9 +110,18 @@ def _respond(state: AgentState) -> dict:
         }
         for h in state.get("hits", [])
     ]
+    answer = state["answer"]
+    if state.get("low_confidence"):
+        # Spec §11.8: below the groundedness threshold, say so rather than
+        # presenting a weakly-supported answer as reliable.
+        answer = (
+            "⚠️ Low confidence — the retrieved sources only weakly support this "
+            "answer, so treat it as a starting point and verify against the cited "
+            f"documents:\n\n{answer}"
+        )
     return {
         "response": {
-            "answer": state["answer"],
+            "answer": answer,
             "citations": state.get("citations", []),
             "retrieved_sources": sources,
             "reference_date_used": state.get("ref_date_iso", date.today().isoformat()),
@@ -105,6 +130,8 @@ def _respond(state: AgentState) -> dict:
             "degraded": state.get("degraded", False),
             "verified_citations": state.get("verified", True),
             "hallucinated_citations": state.get("hallucinated", []),
+            "groundedness": state.get("groundedness"),
+            "low_confidence": state.get("low_confidence", False),
         }
     }
 
@@ -124,6 +151,8 @@ def _refuse(state: AgentState) -> dict:
             "degraded": False,
             "verified_citations": True,
             "hallucinated_citations": [],
+            "groundedness": None,   # nothing retrieved to be grounded against
+            "low_confidence": False,
         }
     }
 
@@ -140,6 +169,7 @@ def build_agent():
     g.add_node("expand", _expand)
     g.add_node("generate", _generate)
     g.add_node("verify", _verify)
+    g.add_node("groundedness", _groundedness)
     g.add_node("respond", _respond)
     g.add_node("refuse", _refuse)
 
@@ -152,7 +182,8 @@ def build_agent():
     g.add_edge("retrieve", "expand")
     g.add_edge("expand", "generate")
     g.add_edge("generate", "verify")
-    g.add_edge("verify", "respond")
+    g.add_edge("verify", "groundedness")
+    g.add_edge("groundedness", "respond")
     g.add_edge("respond", END)
     g.add_edge("refuse", END)
     return g.compile()
