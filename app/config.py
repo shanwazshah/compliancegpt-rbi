@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     # App
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    api_key: str = ""             # if set, /api/query requires header X-API-Key
+    rate_limit_per_min: int = 30  # per-client requests/min on /api/query
 
 
 # Import this singleton everywhere: `from app.config import settings`

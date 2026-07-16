@@ -6,9 +6,10 @@ reports each. A health check that actually probes dependencies is what lets an
 orchestrator (or you) know the system is *ready*, not merely *running*.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.api.security import rate_limit, require_api_key
 from app.config import settings
 
 router = APIRouter(prefix="/api")
@@ -88,7 +89,11 @@ def health() -> dict:
     }
 
 
-@router.post("/query", response_model=QueryResponse)
+@router.post(
+    "/query",
+    response_model=QueryResponse,
+    dependencies=[Depends(require_api_key), Depends(rate_limit)],
+)
 def query(req: QueryRequest) -> QueryResponse:
     """Answer a compliance question via the LangGraph agent.
 

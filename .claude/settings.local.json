@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Set-Location \"C:\\\\Users\\\\shanwaz\\\\Desktop\\\\claude RAG\"; $env:PYTHONIOENCODING='utf-8'; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from ingestion.scrapers.rbi_master_directions import scrape; scrape\\(limit=3\\)\")"
+      "PowerShell(Set-Location \"C:\\\\Users\\\\shanwaz\\\\Desktop\\\\claude RAG\"; $env:PYTHONIOENCODING='utf-8'; & \".\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from ingestion.scrapers.rbi_master_directions import scrape; scrape\\(limit=3\\)\")",
+      "Bash(git add *)",
+      "Bash(git -c user.name=shanwaz -c user.email=shanwazshah72@gmail.com commit -q -m ' *)"
     ]
   }
 }
