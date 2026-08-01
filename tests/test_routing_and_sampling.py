@@ -83,3 +83,46 @@ def test_truncation_would_have_been_unrepresentative():
     assert len(truncated) == 1, "first-N is single-difficulty — exactly the bias to avoid"
     sampled = collections.Counter(r["difficulty"] for r in stratified_sample(rows, 24))
     assert len(sampled) > 1
+
+
+# ---- resumable evals ----
+
+
+def test_cache_roundtrip_and_resume_skips_completed_rows(tmp_path, monkeypatch):
+    """A quota-limited run must accumulate, not restart.
+
+    Without this, a free tier that allows ~22 rows/day can never reach a
+    full-set denominator no matter how many times the eval runs.
+    """
+    import evals.run_evals as harness
+
+    monkeypatch.setattr(harness, "CACHE", tmp_path / "eval_cache.jsonl")
+
+    row = {"question": "q1", "reference_date": "2024-06-30", "difficulty": "adversarial_temporal"}
+    key = harness._row_key(row)
+    harness.append_cache(key, row, ["RBI/DOR/2025-26/361"], "an answer", "abc123")
+
+    cache = harness.load_cache()
+    assert key in cache
+    assert cache[key]["cited"] == ["RBI/DOR/2025-26/361"]
+    assert cache[key]["git_commit_sha"] == "abc123"
+
+
+def test_row_key_distinguishes_the_same_question_at_different_dates():
+    import evals.run_evals as harness
+
+    base = {"question": "What governs KYC?"}
+    assert harness._row_key({**base, "reference_date": "2024-06-30"}) != harness._row_key(
+        {**base, "reference_date": None}
+    )
+
+
+def test_corrupt_cache_line_is_skipped_not_fatal(tmp_path, monkeypatch):
+    """An interrupted run can leave a half-written line; it must not break resume."""
+    import evals.run_evals as harness
+
+    cache = tmp_path / "eval_cache.jsonl"
+    cache.write_text('{"key": "a", "cited": [], "answer": "ok"}\n{"key": "b", "cit\n')
+    monkeypatch.setattr(harness, "CACHE", cache)
+    loaded = harness.load_cache()
+    assert set(loaded) == {"a"}

@@ -30,6 +30,8 @@ from evals.project_metrics import score_all
 GOLDEN = Path("evals") / "golden_dataset.jsonl"
 REPORT_DIR = Path("evals") / "reports"
 METRICS_JSON = REPORT_DIR / "latest_metrics.json"
+# Per-row results, so a quota-limited run can be resumed instead of restarted.
+CACHE = REPORT_DIR / "eval_cache.jsonl"
 K = 5
 DEFAULT_STRATEGY = "dense"      # the measured-best strategy (see ablation report)
 
@@ -94,6 +96,48 @@ def retrieval_metrics(rows: list[dict], strategy: str = DEFAULT_STRATEGY) -> dic
     }
 
 
+def _row_key(row: dict) -> str:
+    """Stable identity for a golden row."""
+    return f"{row['question']}||{row.get('reference_date') or ''}"
+
+
+def load_cache() -> dict[str, dict]:
+    """Previously scored rows, keyed by question+date.
+
+    Makes the eval resumable: on a free API tier the full run does not fit in one
+    day's token quota, so rows completed today are reused tomorrow instead of
+    being paid for twice. Without this, a quota-limited eval can never reach a
+    full-set denominator no matter how many times it runs.
+    """
+    if not CACHE.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for line in CACHE.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue        # a half-written line from an interrupted run
+        out[rec["key"]] = rec
+    return out
+
+
+def append_cache(key: str, row: dict, cited: list[str], answer: str, sha: str | None) -> None:
+    """Append one scored row. Append-only so an interrupted run loses at most one."""
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "key": key,
+        "question": row["question"],
+        "reference_date": row.get("reference_date"),
+        "cited": cited,
+        "answer": answer,
+        "git_commit_sha": sha,
+    }
+    with CACHE.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def stratified_sample(rows: list[dict], n: int, seed: int = 20260801) -> list[dict]:
     """Take `n` rows keeping each difficulty's share of the set.
 
@@ -119,22 +163,42 @@ def stratified_sample(rows: list[dict], n: int, seed: int = 20260801) -> list[di
     return picked[:n]
 
 
-def end_to_end(rows: list[dict], limit: int | None = None, sample: int | None = None) -> list[dict]:
+def end_to_end(
+    rows: list[dict],
+    limit: int | None = None,
+    sample: int | None = None,
+    resume: bool = False,
+) -> list[dict]:
     """Run the full agent over the golden set and collect what it cited."""
     from app.agent.graph import run_agent
 
-    scored = [
+    scorable = [
         r
         for r in rows
         if r["difficulty"] in ("adversarial_temporal", "out_of_scope")
         or r.get("expected_doc_numbers")
     ]
+
+    cache = load_cache() if resume else {}
+    results: list[dict] = []
+    if cache:
+        # Replay everything already scored, then only spend quota on the rest.
+        for r in scorable:
+            rec = cache.get(_row_key(r))
+            if rec:
+                results.append({"row": r, "cited": rec["cited"], "answer": rec["answer"]})
+        print(f"  resumed {len(results)} row(s) from {CACHE}")
+
+    done = {_row_key(r["row"]) for r in results}
+    scored = [r for r in scorable if _row_key(r) not in done]
     if sample:
         scored = stratified_sample(scored, sample)
     elif limit:
         scored = scored[:limit]
+    if resume:
+        print(f"  {len(scored)} row(s) still to run this pass")
 
-    results = []
+    sha = _git_sha()
     for i, r in enumerate(scored, 1):
         try:
             # Cache off: a cache hit would score a stale answer, not this build's.
@@ -149,14 +213,11 @@ def end_to_end(rows: list[dict], limit: int | None = None, sample: int | None = 
                 raise RuntimeError(
                     "generation degraded (LLM unavailable) — not a scorable answer"
                 )
-            results.append(
-                {
-                    "row": r,
-                    "cited": [c["doc_number"] for c in out.get("citations", [])],
-                    "answer": out.get("answer", ""),
-                    "degraded": False,
-                }
-            )
+            cited = [c["doc_number"] for c in out.get("citations", [])]
+            answer = out.get("answer", "")
+            results.append({"row": r, "cited": cited, "answer": answer, "degraded": False})
+            if resume:
+                append_cache(_row_key(r), r, cited, answer, sha)
         except Exception as exc:  # noqa: BLE001
             # A failed run is NOT a scored failure — record it and exclude it,
             # the same rule the generation-metrics harness applies to failed
@@ -178,6 +239,12 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="score a stratified sample of N rows (preferred over --limit when quota-bound)",
     )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse rows already scored (evals/reports/eval_cache.jsonl) and only run the "
+        "rest — lets a free-tier daily quota accumulate into a full-set measurement",
+    )
     ap.add_argument("--strategy", default=DEFAULT_STRATEGY)
     args = ap.parse_args(argv)
 
@@ -196,7 +263,9 @@ def main(argv: list[str] | None = None) -> None:
     scored = {}
     ok_results: list[dict] = []
     if not args.retrieval_only:
-        results = end_to_end(rows, limit=args.limit, sample=args.sample)
+        results = end_to_end(
+            rows, limit=args.limit, sample=args.sample, resume=args.resume
+        )
         ok_results = [r for r in results if "error" not in r]
         excluded = len(results) - len(ok_results)
         if excluded:
