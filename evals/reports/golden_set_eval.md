@@ -1,7 +1,7 @@
 # Golden-Set Eval
 
-- Date: 2026-08-01
-- Commit: `a396fb22173b`
+- Date: 2026-08-02
+- Commit: `c4258cd599ae`
 - Generation model: `llama3.2` (classify: `llama3.2`)
 - Embeddings: `BAAI/bge-small-en-v1.5`
 - Retrieval strategy: dense
