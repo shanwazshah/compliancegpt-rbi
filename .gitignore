@@ -11,9 +11,12 @@ dist/
 venv/
 env/
 
-# Environment secrets (NEVER commit real keys)
+# Environment secrets (NEVER commit real keys).
+# The glob matters: switching providers creates backups like `.env.groq.bak`,
+# which hold live keys just as the original does.
 .env
-.env.local
+.env.*
+!.env.example
 
 # Data & caches (downloaded PDFs, parsed text, model caches)
 data/
