@@ -287,10 +287,19 @@ def main(argv: list[str] | None = None) -> None:
             scored = score_all(ok_results, known_doc_numbers=_known_doc_numbers())
             metrics = {name: m.value for name, m in scored.items()}
 
+    from app.config import settings
+
     payload = {
         "date": date.today().isoformat(),
         "git_commit_sha": _git_sha(),
         "strategy": args.strategy,
+        # Which model produced these numbers. Without this a run on a small local
+        # model is indistinguishable from a run on the 70B, and the metrics get
+        # read as describing a system that never produced them.
+        "llm_model": settings.llm_model,
+        "llm_model_fast": settings.llm_model_fast,
+        "llm_base_url": settings.llm_base_url,
+        "embedding_model": settings.embedding_model,
         "golden_set_size": len(rows),
         "scored_rows": len(ok_results),
         "recall_at_5": retrieval["recall_at_k"],
@@ -324,6 +333,9 @@ def _write_report(rows: list[dict], retrieval: dict, scored: dict, payload: dict
         "",
         f"- Date: {payload['date']}",
         f"- Commit: `{(payload['git_commit_sha'] or 'unknown')[:12]}`",
+        f"- Generation model: `{payload['llm_model']}` "
+        f"(classify: `{payload['llm_model_fast']}`)",
+        f"- Embeddings: `{payload['embedding_model']}`",
         f"- Retrieval strategy: {payload['strategy']}",
         f"- Golden set: {payload['golden_set_size']} rows "
         f"({dict(by_difficulty)})",
