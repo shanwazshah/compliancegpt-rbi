@@ -1,9 +1,9 @@
 {
   "date": "2026-08-01",
-  "git_commit_sha": "de7fb7bc721dbe91b390f9b7c897bb383b239f9c",
+  "git_commit_sha": "3295a158de078f7786e8340ebcb0b445979edb50",
   "strategy": "dense",
   "golden_set_size": 95,
-  "scored_rows": 0,
+  "scored_rows": 22,
   "recall_at_5": 0.9459459459459459,
   "mrr": 0.7936936936936936,
   "citation_accuracy": null,

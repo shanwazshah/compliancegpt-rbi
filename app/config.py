@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""           # only used when llm_provider="anthropic"
     groundedness_threshold: float = 0.7
 
+    # Cost-aware routing: small, structured tasks (scope classification) go to a
+    # cheaper model; only answer generation needs the large one. On Groq the two
+    # models also draw on SEPARATE daily token quotas, so routing buys headroom
+    # as well as cost. Set llm_model_fast = llm_model to disable routing.
+    llm_model_fast: str = "llama-3.1-8b-instant"
+
     # Observability — Langfuse tracing is OPTIONAL. With both keys unset, the
     # agent still records per-node latency in-process (app/observability/tracing.py);
     # setting them additionally exports each trace to Langfuse.

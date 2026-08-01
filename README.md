@@ -115,19 +115,31 @@ not beat it in aggregate, and we default to the measured-best rather than the
 fanciest (spec's honesty requirement). See
 [ADR 0002](docs/adr/0002-why-hybrid-retrieval.md) for the analysis.
 
-### Generation metrics — run in progress
+### Generation metrics — blocked on LLM quota, not on capability
 
-The harness is built, unit-tested, and currently executing against the corpus;
-numbers land in [`evals/reports/golden_set_eval.md`](evals/reports/) and
-`latest_metrics.json`. They are deliberately absent here rather than estimated.
+The harness is built and unit-tested. The blocker is arithmetic, not engineering:
+the full 95-row eval costs **~432,000 tokens** (~4,500 per row across classify →
+generate → groundedness, since generation sends expanded parent context), against
+a **100,000 tokens/day** free-tier allowance. The last run scored 22 of 95 rows
+before the daily limit hit, and the harness **refused to report** metrics computed
+on that 23% sample:
+
+```
+!! Only 22/95 rows produced a scorable answer (23%). Reporting the project
+   metrics as NOT MEASURED rather than computing them over the survivors.
+```
 
 | Metric | Status |
 |---|---|
-| Citation accuracy | scored by [`project_metrics.py`](evals/project_metrics.py); run in progress |
-| Temporal correctness | run in progress |
-| Refusal correctness | run in progress |
+| Citation accuracy | scored by [`project_metrics.py`](evals/project_metrics.py); needs ~432k tokens |
+| Temporal correctness | same |
+| Refusal correctness | same |
 | Injection resistance / hallucination rate | [35-case red-team suite](evals/red_team.py) built; run pending |
 | Faithfulness / answer relevancy | last run failed 6/6 on rate limits, reported as `n/a` not `0.0` ([report](evals/reports/generation_metrics.md)) |
+
+Unblocking it is a config change, not a code change ([ADR 0006](docs/adr/0006-swappable-models-behind-interfaces.md)):
+a paid tier, a local Ollama endpoint, or routing the two cheap nodes (classify,
+groundedness) to a smaller model so the 70B quota is spent only on generation.
 
 **Why this section is worth reading.** The first full run of this harness
 reported *temporal correctness 100%* — and it was false. An expired API key sent

@@ -17,7 +17,9 @@ from app.prompts import CLASSIFY_SYSTEM_PROMPT
 def classify_query(question: str) -> dict:
     """Return {'in_scope': bool, 'reference_date': str | None}."""
     try:
-        raw = complete(CLASSIFY_SYSTEM_PROMPT, question, max_tokens=120)
+        # node="classify" routes this to the small model (see app/llm.py FAST_NODES):
+        # a short scope check returning JSON does not need the 70B.
+        raw = complete(CLASSIFY_SYSTEM_PROMPT, question, max_tokens=120, node="classify")
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return {

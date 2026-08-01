@@ -1,7 +1,7 @@
 # Golden-Set Eval
 
 - Date: 2026-08-01
-- Commit: `de7fb7bc721d`
+- Commit: `3295a158de07`
 - Retrieval strategy: dense
 - Golden set: 95 rows ({'easy': 8, 'medium': 28, 'hard': 1, 'adversarial_temporal': 48, 'out_of_scope': 10})
 - Row provenance: {'hand_written': 37, 'generated_from_rbi_withdrawn_index': 39, 'generated_from_md_issue_dates': 19}

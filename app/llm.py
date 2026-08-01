@@ -15,6 +15,26 @@ from __future__ import annotations
 from app.config import settings
 from app.observability.cost import Usage, compute_cost, record
 
+# Which agent nodes are cheap enough for the small model. Everything absent from
+# this set gets the primary model.
+#
+# `classify` is a short scope check returning JSON — a small model does it well.
+# `generate` is NOT here and should not be: it is the node whose output the user
+# reads and whose citations every metric scores, so downgrading it would change
+# what the evals measure, not just what they cost.
+#
+# `groundedness` is absent for a different reason — it makes no LLM call at all
+# (app/agent/nodes/groundedness.py scores lexical overlap), so there is nothing
+# to route.
+FAST_NODES = frozenset({"classify", "judge"})
+
+
+def model_for(node: str | None) -> str:
+    """Resolve which model a node should use."""
+    if node in FAST_NODES and settings.llm_model_fast:
+        return settings.llm_model_fast
+    return settings.llm_model
+
 
 def complete_with_usage(
     system: str,
@@ -30,7 +50,8 @@ def complete_with_usage(
     API request can total the cost of every node without threading it through
     the agent state.
     """
-    model = model or settings.llm_model
+    # Explicit model wins; otherwise route by node (see FAST_NODES).
+    model = model or model_for(node)
 
     if settings.llm_provider.lower() == "anthropic":
         import anthropic

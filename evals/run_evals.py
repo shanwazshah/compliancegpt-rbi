@@ -94,7 +94,32 @@ def retrieval_metrics(rows: list[dict], strategy: str = DEFAULT_STRATEGY) -> dic
     }
 
 
-def end_to_end(rows: list[dict], limit: int | None = None) -> list[dict]:
+def stratified_sample(rows: list[dict], n: int, seed: int = 20260801) -> list[dict]:
+    """Take `n` rows keeping each difficulty's share of the set.
+
+    A quota-limited run should be a *designed sample*, not a truncation. Taking
+    the first N rows would over-weight whatever happens to sort first — the
+    golden set is grouped by difficulty, so `[:22]` is almost all one kind of
+    question. Sampling proportionally means the reported metric is a real
+    estimate over the whole set, and the row count is stated alongside it.
+    """
+    import collections
+    import random
+
+    rng = random.Random(seed)
+    by_difficulty: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in rows:
+        by_difficulty[r["difficulty"]].append(r)
+
+    picked: list[dict] = []
+    for difficulty, group in sorted(by_difficulty.items()):
+        share = max(1, round(n * len(group) / len(rows)))
+        picked.extend(rng.sample(group, min(share, len(group))))
+    rng.shuffle(picked)
+    return picked[:n]
+
+
+def end_to_end(rows: list[dict], limit: int | None = None, sample: int | None = None) -> list[dict]:
     """Run the full agent over the golden set and collect what it cited."""
     from app.agent.graph import run_agent
 
@@ -104,7 +129,9 @@ def end_to_end(rows: list[dict], limit: int | None = None) -> list[dict]:
         if r["difficulty"] in ("adversarial_temporal", "out_of_scope")
         or r.get("expected_doc_numbers")
     ]
-    if limit:
+    if sample:
+        scored = stratified_sample(scored, sample)
+    elif limit:
         scored = scored[:limit]
 
     results = []
@@ -144,7 +171,13 @@ def end_to_end(rows: list[dict], limit: int | None = None) -> list[dict]:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--retrieval-only", action="store_true", help="skip LLM calls")
-    ap.add_argument("--limit", type=int, default=None, help="cap end-to-end rows")
+    ap.add_argument("--limit", type=int, default=None, help="cap end-to-end rows (truncates)")
+    ap.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="score a stratified sample of N rows (preferred over --limit when quota-bound)",
+    )
     ap.add_argument("--strategy", default=DEFAULT_STRATEGY)
     args = ap.parse_args(argv)
 
@@ -163,7 +196,7 @@ def main(argv: list[str] | None = None) -> None:
     scored = {}
     ok_results: list[dict] = []
     if not args.retrieval_only:
-        results = end_to_end(rows, limit=args.limit)
+        results = end_to_end(rows, limit=args.limit, sample=args.sample)
         ok_results = [r for r in results if "error" not in r]
         excluded = len(results) - len(ok_results)
         if excluded:

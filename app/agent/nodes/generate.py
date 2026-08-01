@@ -19,7 +19,9 @@ from app.prompts import (
 def generate_answer(question: str, contexts: list[dict]) -> dict:
     """Generate a cited answer from the retrieved context."""
     user = build_generation_user_message(question, contexts)
-    answer = complete(GENERATION_SYSTEM_PROMPT, user, max_tokens=1024)
+    # Deliberately NOT routed to the small model: this is the node whose output
+    # the user reads and whose citations every metric scores.
+    answer = complete(GENERATION_SYSTEM_PROMPT, user, max_tokens=1024, node="generate")
     return {
         "answer": answer,
         "prompt_version": GENERATION_PROMPT_VERSION,
