@@ -62,8 +62,8 @@ semantically perfect but no longer in force.
 | Chunks embedded in Qdrant | **868** |
 | Withdrawn circulars ingested from RBI's published index | **574** |
 | …of those, issue date verified from the circular's own page | **426** |
-| Documents in Postgres (30 active + 464 superseded) | **494** |
-| Supersession edges | **103** |
+| Documents in Postgres (30 active + 465 superseded) | **495** |
+| Supersession edges (102 title-matched + 1 hand-verified) | **103** |
 
 ### The temporal filter, measured against the real graph
 
