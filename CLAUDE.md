@@ -27,6 +27,21 @@ python -m venv .venv
 
 # Apply a new migration manually (initdb only auto-runs on first DB boot)
 docker exec -i compliance_postgres psql -U compliance -d compliancegpt < migrations/000X_*.sql
+
+# Ingest (in order; scrapers cache to data/ so re-runs are cheap)
+python -m ingestion.scrapers.rbi_master_directions      # 30 NBFC MDs + PDFs
+python -m ingestion.load_documents
+python -m ingestion.parsing.pdf_to_structured
+python -m ingestion.indexing.embed_and_upsert
+python -m ingestion.scrapers.rbi_circulars_withdrawn    # 574 withdrawn circulars (~10 min)
+python -m ingestion.graph.withdrawn_edges --dry-run     # preview matches, then drop --dry-run
+python -m ingestion.graph.supersession_builder          # hand-verified seed edges
+
+# Evals
+python -m evals.run_evals --retrieval-only   # no LLM calls
+python -m evals.run_evals                    # + the three spec §14 metrics
+python -m evals.gate                         # CI gate: fails on regression
+python -m evals.generate_temporal_rows       # rebuild date-scoped golden rows
 ```
 
 ## Directory map

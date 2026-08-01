@@ -37,6 +37,10 @@ dev = [
 # Layout-aware parser (better tables) — needs significant RAM. Opt-in upgrade
 # over the default pdfplumber path: pip install -e ".[docling]"
 docling = ["docling>=2.0"]
+# Hosted trace export. Optional by design: without it the agent still records
+# per-node latency in-process (app/observability/tracing.py), so the latency
+# numbers this project reports never depend on an external service being up.
+langfuse = ["langfuse>=2.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

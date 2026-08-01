@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""           # only used when llm_provider="anthropic"
     groundedness_threshold: float = 0.7
 
+    # Observability — Langfuse tracing is OPTIONAL. With both keys unset, the
+    # agent still records per-node latency in-process (app/observability/tracing.py);
+    # setting them additionally exports each trace to Langfuse.
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "http://localhost:3000"
+
     # App
     api_host: str = "0.0.0.0"
     api_port: int = 8000

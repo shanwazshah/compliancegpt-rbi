@@ -27,6 +27,10 @@ qdrant_storage/
 .DS_Store
 Thumbs.db
 
+# Generator output that is merged into evals/golden_dataset.jsonl — committing it
+# too would leave two sources of truth for the same rows.
+evals/temporal_rows.jsonl
+
 # Test / tooling artifacts
 .pytest_cache/
 .ruff_cache/

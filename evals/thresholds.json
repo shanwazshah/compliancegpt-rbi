@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Floors the golden-set eval must clear. CI fails the build when a measured",
+    "metric drops below its floor (evals/gate.py).",
+    "",
+    "Rules these numbers follow:",
+    "  * A floor is set BELOW the current measured value, not at it — retrieval",
+    "    has run-to-run variance and a floor pinned to the exact current number",
+    "    turns normal noise into red builds, which trains people to ignore the gate.",
+    "  * A metric that was never measured is `null` here and is NOT enforced.",
+    "    Enforcing a threshold on an unmeasured metric would fail every build for",
+    "    a reason unrelated to the change under review.",
+    "  * Raise a floor deliberately, in the same PR that improves the metric."
+  ],
+  "recall_at_5": 0.85,
+  "mrr": 0.7,
+  "temporal_correctness": null,
+  "citation_accuracy": null,
+  "refusal_correctness": null
+}

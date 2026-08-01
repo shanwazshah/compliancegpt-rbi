@@ -24,6 +24,7 @@ from app.agent.nodes.verify import verify_citations
 from app.agent.state import AgentState
 from app.config import settings
 from app.db.queries import get_connection
+from app.observability.tracing import span
 from app.retrieval.retrieve import retrieve
 from app.retrieval.temporal_filter import in_force_doc_numbers
 
@@ -31,51 +32,70 @@ DISCLAIMER = "This is decision-support information, not legal advice."
 
 
 def _classify(state: AgentState) -> dict:
-    result = classify_query(state["question"])
+    with span("classify") as s:
+        result = classify_query(state["question"])
+        s.note(in_scope=result["in_scope"])
     # Explicit input date wins; otherwise use the date the classifier extracted.
     ref = state.get("reference_date") or result["reference_date"]
     return {"in_scope": result["in_scope"], "reference_date": ref}
 
 
 def _resolve_temporal(state: AgentState) -> dict:
-    ref = state.get("reference_date")
-    ref_date = date.fromisoformat(ref) if ref else date.today()
-    with get_connection() as conn:
-        allowed = in_force_doc_numbers(conn, ref_date)
+    with span("resolve_temporal") as s:
+        ref = state.get("reference_date")
+        ref_date = date.fromisoformat(ref) if ref else date.today()
+        with get_connection() as conn:
+            allowed = in_force_doc_numbers(conn, ref_date)
+        s.note(reference_date=ref_date.isoformat(), in_force_docs=len(allowed))
     return {"ref_date_iso": ref_date.isoformat(), "allowed_doc_numbers": allowed}
 
 
 def _retrieve(state: AgentState) -> dict:
-    hits = retrieve(
-        state["question"],
-        k=8,
-        strategy="dense",
-        allowed_doc_numbers=state.get("allowed_doc_numbers"),
-    )
+    with span("retrieve", strategy="dense", k=8) as s:
+        hits = retrieve(
+            state["question"],
+            k=8,
+            strategy="dense",
+            allowed_doc_numbers=state.get("allowed_doc_numbers"),
+        )
+        # Candidate doc numbers + scores are the single most useful thing to have
+        # in a trace when a retrieval answer looks wrong.
+        s.note(
+            hits=len(hits),
+            candidates=[{"doc": h["doc_number"], "score": round(h["score"], 4)} for h in hits],
+        )
     return {"hits": hits}
 
 
 def _expand(state: AgentState) -> dict:
-    return {"contexts": expand_context(state["hits"])}
+    with span("expand") as s:
+        contexts = expand_context(state["hits"])
+        s.note(blocks=len(contexts))
+    return {"contexts": contexts}
 
 
 def _generate(state: AgentState) -> dict:
-    try:
-        gen = generate_answer(state["question"], state.get("contexts") or state["hits"])
-        return {"answer": gen["answer"], "model": gen["model"], "degraded": False}
-    except Exception as exc:  # graceful degradation (spec §15)
-        return {
-            "answer": (
-                "The answer service is unavailable, so I can't generate a written answer. "
-                f"The relevant source passages are listed below. (reason: {type(exc).__name__})"
-            ),
-            "model": None,
-            "degraded": True,
-        }
+    with span("generate") as s:
+        try:
+            gen = generate_answer(state["question"], state.get("contexts") or state["hits"])
+            s.note(model=gen["model"], degraded=False)
+            return {"answer": gen["answer"], "model": gen["model"], "degraded": False}
+        except Exception as exc:  # graceful degradation (spec §15)
+            s.note(degraded=True, reason=type(exc).__name__)
+            return {
+                "answer": (
+                    "The answer service is unavailable, so I can't generate a written answer. "
+                    f"The relevant source passages are listed below. (reason: {type(exc).__name__})"
+                ),
+                "model": None,
+                "degraded": True,
+            }
 
 
 def _verify(state: AgentState) -> dict:
-    ok, _cited, hallucinated = verify_citations(state["answer"], state["hits"])
+    with span("verify") as s:
+        ok, _cited, hallucinated = verify_citations(state["answer"], state["hits"])
+        s.note(verified=ok, hallucinated=hallucinated)
     seen, citations = set(), []
     for h in state["hits"]:
         dn = h["doc_number"]

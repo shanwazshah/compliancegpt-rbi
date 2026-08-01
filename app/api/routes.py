@@ -47,6 +47,13 @@ class QueryResponse(BaseModel):
     groundedness: float | None = None   # 0..1 support of answer by context
     low_confidence: bool = False        # groundedness < threshold
     cached: bool = False
+    latency_ms: int | None = None
+    node_timings: dict[str, float] | None = None   # per-node ms (spec §15)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    # None (not 0.0) when the model's price isn't in the table — an unmeasured
+    # cost must never be reported as a free one.
+    cost_usd: float | None = None
 
 
 def _check_postgres() -> bool:
@@ -104,18 +111,30 @@ def query(req: QueryRequest) -> QueryResponse:
     with out-of-scope questions routed to a refusal. Each call is logged (with the
     question PII-redacted) for observability.
     """
-    import time
-
     from app.agent.graph import run_agent
+    from app.observability import cost as cost_mod
+    from app.observability.tracing import trace
 
-    start = time.monotonic()
-    result = run_agent(req.question, req.reference_date)
-    latency_ms = int((time.monotonic() - start) * 1000)
-    _log_query(req, result, latency_ms)
+    # One trace per request: node timings and token cost are collected here and
+    # returned in the payload, so "p95 latency" and "$/query" are measured
+    # numbers rather than estimates.
+    with cost_mod.capture() as usage, trace("query", reference_date=req.reference_date) as t:
+        result = run_agent(req.question, req.reference_date)
+        t.note(cached=result.get("cached"), degraded=result.get("degraded"))
+
+    result = {
+        **result,
+        "latency_ms": int(t.duration_ms),
+        "node_timings": t.timings(),
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "cost_usd": usage.cost_usd,
+    }
+    _log_query(req, result)
     return QueryResponse(**result)
 
 
-def _log_query(req: QueryRequest, result: dict, latency_ms: int) -> None:
+def _log_query(req: QueryRequest, result: dict) -> None:
     """Best-effort query logging — never let logging break the response."""
     from app.db.queries import get_connection, insert_query_log
     from app.observability.redaction import redact
@@ -132,11 +151,63 @@ def _log_query(req: QueryRequest, result: dict, latency_ms: int) -> None:
                     "answer_text": result.get("answer"),
                     "degraded": result.get("degraded"),
                     "verified_citations": result.get("verified_citations"),
-                    "latency_ms": latency_ms,
+                    "latency_ms": result.get("latency_ms"),
+                    "prompt_tokens": result.get("prompt_tokens"),
+                    "completion_tokens": result.get("completion_tokens"),
+                    "token_cost": result.get("cost_usd"),
+                    "groundedness_score": result.get("groundedness"),
+                    "cache_hit": result.get("cached", False),
+                    "llm_model": result.get("model"),
                 },
             )
     except Exception:
         pass
+
+
+@router.get("/eval/latest")
+def eval_latest() -> dict:
+    """The most recent eval run (spec §12) — the metrics CI last recorded.
+
+    Returns `{"eval_run": null}` when no eval has been recorded yet, rather than
+    inventing placeholder metrics.
+    """
+    from app.db.queries import get_connection, latest_eval_run
+
+    with get_connection() as conn:
+        return {"eval_run": latest_eval_run(conn)}
+
+
+class FeedbackRequest(BaseModel):
+    query_log_id: str
+    rating: int = Field(..., ge=1, le=5)
+    comment: str | None = Field(None, max_length=2000)
+
+
+@router.post("/feedback")
+def feedback(req: FeedbackRequest) -> dict:
+    """Record a rating against a logged query (spec §12).
+
+    The comment is PII-redacted on the way in, like the query text: feedback is
+    free-text a user might paste an account number into.
+    """
+    from fastapi import HTTPException
+
+    from app.db.queries import get_connection, insert_feedback
+    from app.observability.redaction import redact
+
+    try:
+        with get_connection() as conn:
+            ok = insert_feedback(
+                conn,
+                query_log_id=req.query_log_id,
+                rating=req.rating,
+                comment=redact(req.comment) if req.comment else None,
+            )
+    except Exception as exc:  # noqa: BLE001 - surface a clean 400 for a bad uuid
+        raise HTTPException(status_code=400, detail=f"could not record feedback: {exc}") from exc
+    if not ok:
+        raise HTTPException(status_code=404, detail="query_log_id not found")
+    return {"status": "recorded"}
 
 
 @router.get("/documents")

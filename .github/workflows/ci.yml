@@ -55,3 +55,69 @@ jobs:
 
       - name: Test (pytest)
         run: pytest -q
+
+  # ---------------------------------------------------------------------------
+  # Eval gate (spec §19, Phase 3).
+  #
+  # Runs on PRs that touch the things capable of moving a metric — prompts,
+  # retrieval, and the agent — plus the eval harness itself.
+  #
+  # Two layers, because they fail for different reasons:
+  #
+  #   1. The eval CONTRACT, which always runs here and needs no corpus: the
+  #      golden set must keep its size and its temporal/refusal coverage, the
+  #      metric scorers must behave, and the gate must still fail on regression.
+  #      This catches the realistic regressions — someone trimming the golden set,
+  #      or "fixing" a scorer so failures stop counting.
+  #
+  #   2. The MEASURED metrics, compared against evals/thresholds.json. A full
+  #      eval needs the ingested corpus (Qdrant vectors + Postgres rows), which a
+  #      clean CI runner does not have and must not scrape RBI to build. The gate
+  #      therefore SKIPS rather than fails when no metrics file is present — an
+  #      eval that could not run is an infrastructure gap, not a quality
+  #      regression, and a gate that goes red for the wrong reason gets ignored.
+  #      Populate evals/reports/latest_metrics.json by running
+  #      `python -m evals.run_evals` against a machine that has the corpus.
+  # ---------------------------------------------------------------------------
+  eval-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Does this PR touch anything that can move a metric?
+        id: changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$BASE"...HEAD \
+               | grep -Eq '^(app/prompts\.py|app/retrieval/|app/agent/|evals/)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No retrieval/agent/prompt/eval changes — eval gate not required."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+
+      # Only the eval harness's own dependencies — not the ML stack, which this
+      # layer does not need.
+      - name: Install
+        if: steps.changed.outputs.relevant == 'true'
+        run: pip install pytest pydantic pydantic-settings
+
+      - name: Eval contract (golden-set composition, scorers, gate logic)
+        if: steps.changed.outputs.relevant == 'true'
+        run: |
+          pytest -q tests/test_golden_dataset.py \
+                    tests/test_project_metrics.py \
+                    tests/test_eval_gate.py
+
+      - name: Threshold gate
+        if: steps.changed.outputs.relevant == 'true'
+        run: python -m evals.gate

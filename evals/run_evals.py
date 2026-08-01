@@ -1,126 +1,275 @@
-"""Phase 1 manual eval pass.
+"""Golden-set eval: retrieval metrics + the three project metrics (spec §14).
 
-Measures two things over the golden set:
-  1. Retrieval quality (cheap, no LLM): Recall@5 and MRR over answerable rows —
-     does dense search surface the expected document in the top 5?
-  2. End-to-end generation on a small sample: does the answer cite the expected
-     document, and are out-of-scope questions handled?
+Produces three artifacts:
+  * `evals/reports/golden_set_eval.md` — the human-readable report
+  * `evals/reports/latest_metrics.json` — machine-readable, consumed by the CI gate
+  * a row in `eval_runs` — the eval history the API exposes at /api/eval/latest
 
-Writes a Markdown report to evals/reports/. This is the Phase 1 eval deliverable;
-the full RAGAS + ablation harness arrives in Phase 2.
+Metrics that could not be computed are recorded as `null`, never 0.0. A metric
+recorded as zero is a claim that the system failed every case; a metric recorded
+as null is a claim that we did not measure it. CI treats them differently (see
+evals/gate.py), and so should a reader.
 
-Run:  python -m evals.run_evals
+Run:  python -m evals.run_evals                 # retrieval + end-to-end
+      python -m evals.run_evals --retrieval-only  # no LLM calls
+      python -m evals.run_evals --limit 20        # cap end-to-end rows
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
 
-from app.agent.pipeline import answer_query
 from app.retrieval.retrieve import retrieve
+from evals.project_metrics import score_all
 
 GOLDEN = Path("evals") / "golden_dataset.jsonl"
 REPORT_DIR = Path("evals") / "reports"
+METRICS_JSON = REPORT_DIR / "latest_metrics.json"
 K = 5
-GEN_SAMPLE = 4  # how many rows to run full generation on (limits LLM calls)
+DEFAULT_STRATEGY = "dense"      # the measured-best strategy (see ablation report)
 
 
-def _load_golden() -> list[dict]:
+def load_golden() -> list[dict]:
     lines = GOLDEN.read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines if line.strip()]
 
 
-def _answerable_rows(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if r.get("expected_doc_numbers")]
+def _git_sha() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        return None
 
 
-def _retrieval_metrics(rows: list[dict]) -> tuple[float, float, list[dict]]:
+def _known_doc_numbers() -> set[str] | None:
+    """Every doc_number in the corpus, so a hallucinated citation is detectable."""
+    try:
+        from app.db.queries import get_connection, list_documents
+
+        with get_connection() as conn:
+            return {d["doc_number"] for d in list_documents(conn)}
+    except Exception:
+        return None      # can't verify realness; citation accuracy still scores expectedness
+
+
+def retrieval_metrics(rows: list[dict], strategy: str = DEFAULT_STRATEGY) -> dict:
     """Recall@K and MRR over rows that expect at least one document."""
-    answerable = _answerable_rows(rows)
+    answerable = [r for r in rows if r.get("expected_doc_numbers")]
     hits = 0
-    reciprocal_ranks = 0.0
+    rr = 0.0
     details = []
     for r in answerable:
         expected = set(r["expected_doc_numbers"])
-        results = retrieve(r["question"], k=K, strategy="hybrid")
+        results = retrieve(r["question"], k=K, strategy=strategy)
         ranked = [h["doc_number"] for h in results]
         rank = next((i for i, dn in enumerate(ranked, 1) if dn in expected), None)
         if rank:
             hits += 1
-            reciprocal_ranks += 1.0 / rank
+            rr += 1.0 / rank
         details.append(
             {
                 "question": r["question"],
                 "expected": sorted(expected),
                 "rank": rank,
-                "top": ranked[0],
+                "top": ranked[0] if ranked else None,
             }
         )
     n = len(answerable)
-    return (hits / n if n else 0.0), (reciprocal_ranks / n if n else 0.0), details
+    return {
+        "recall_at_k": (hits / n) if n else None,
+        "mrr": (rr / n) if n else None,
+        "n": n,
+        "details": details,
+    }
 
 
-def main() -> None:
-    rows = _load_golden()
-    recall, mrr, details = _retrieval_metrics(rows)
+def end_to_end(rows: list[dict], limit: int | None = None) -> list[dict]:
+    """Run the full agent over the golden set and collect what it cited."""
+    from app.agent.graph import run_agent
 
-    # End-to-end generation on a sample (a few answerable + the refusals).
-    answerable = [r for r in rows if r.get("expected_doc_numbers")][:GEN_SAMPLE]
-    refusals = [r for r in rows if r.get("difficulty") == "out_of_scope"][:2]
-    gen_results = []
-    for r in answerable + refusals:
-        out = answer_query(r["question"])
-        cited = [c["doc_number"] for c in out["citations"]]
-        expected = set(r.get("expected_doc_numbers") or [])
-        gen_results.append(
-            {
-                "question": r["question"],
-                "category": r.get("category"),
-                "expected": sorted(expected),
-                "cited": cited,
-                "citation_ok": (bool(expected) and bool(expected & set(cited)))
-                or (not expected),  # refusals: ok if it cited nothing
-                "answer": out["answer"],
-                "degraded": out["degraded"],
-            }
-        )
+    scored = [
+        r
+        for r in rows
+        if r["difficulty"] in ("adversarial_temporal", "out_of_scope")
+        or r.get("expected_doc_numbers")
+    ]
+    if limit:
+        scored = scored[:limit]
+
+    results = []
+    for i, r in enumerate(scored, 1):
+        try:
+            # Cache off: a cache hit would score a stale answer, not this build's.
+            out = run_agent(r["question"], r.get("reference_date"), use_cache=False)
+            results.append(
+                {
+                    "row": r,
+                    "cited": [c["doc_number"] for c in out.get("citations", [])],
+                    "answer": out.get("answer", ""),
+                    "degraded": out.get("degraded", False),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A failed run is NOT a scored failure — record it and exclude it,
+            # the same rule the generation-metrics harness applies to failed
+            # judge calls (docs/adr/0007).
+            print(f"  ! [{i}/{len(scored)}] run failed ({type(exc).__name__}) — excluded")
+            results.append({"row": r, "cited": [], "answer": "", "error": str(exc)})
+        if i % 10 == 0:
+            print(f"  [{i}/{len(scored)}] evaluated")
+    return results
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--retrieval-only", action="store_true", help="skip LLM calls")
+    ap.add_argument("--limit", type=int, default=None, help="cap end-to-end rows")
+    ap.add_argument("--strategy", default=DEFAULT_STRATEGY)
+    args = ap.parse_args(argv)
+
+    rows = load_golden()
+    print(f"Golden set: {len(rows)} rows")
+
+    retrieval = retrieval_metrics(rows, strategy=args.strategy)
+    recall = retrieval["recall_at_k"]
+    print(f"Recall@{K}={'n/a' if recall is None else format(recall, '.1%')}")
+
+    metrics = {
+        "citation_accuracy": None,
+        "temporal_correctness": None,
+        "refusal_correctness": None,
+    }
+    scored = {}
+    ok_results: list[dict] = []
+    if not args.retrieval_only:
+        results = end_to_end(rows, limit=args.limit)
+        ok_results = [r for r in results if "error" not in r]
+        excluded = len(results) - len(ok_results)
+        if excluded:
+            print(f"  {excluded} row(s) excluded: the agent errored, so they were not scored")
+        scored = score_all(ok_results, known_doc_numbers=_known_doc_numbers())
+        metrics = {name: m.value for name, m in scored.items()}
+
+    payload = {
+        "date": date.today().isoformat(),
+        "git_commit_sha": _git_sha(),
+        "strategy": args.strategy,
+        "golden_set_size": len(rows),
+        "scored_rows": len(ok_results),
+        "recall_at_5": retrieval["recall_at_k"],
+        "mrr": retrieval["mrr"],
+        **metrics,
+    }
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    report = REPORT_DIR / "phase1_manual_eval.md"
+    METRICS_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _write_report(rows, retrieval, scored, payload)
+    _record_eval_run(payload)
+
+    print("\n" + json.dumps(payload, indent=2))
+    print(f"Wrote {METRICS_JSON}")
+
+
+def _write_report(rows: list[dict], retrieval: dict, scored: dict, payload: dict) -> None:
+    import collections
+
+    by_difficulty = collections.Counter(r["difficulty"] for r in rows)
+    by_source = collections.Counter(r.get("source", "unknown") for r in rows)
+
+    def pct(v):
+        return "n/a (not measured)" if v is None else f"{v:.1%}"
+
+    def num(v):
+        return "n/a (not measured)" if v is None else f"{v:.3f}"
+
     lines = [
-        "# Phase 1 — Manual Eval Report",
+        "# Golden-Set Eval",
         "",
-        f"- Date: {date.today().isoformat()}",
-        "- Strategy: hybrid retrieval (bge-small-en-v1.5 + BM25) + Groq llama-3.3-70b generation",
-        f"- Golden set: {len(rows)} rows ({len(_answerable_rows(rows))} answerable)",
+        f"- Date: {payload['date']}",
+        f"- Commit: `{(payload['git_commit_sha'] or 'unknown')[:12]}`",
+        f"- Retrieval strategy: {payload['strategy']}",
+        f"- Golden set: {payload['golden_set_size']} rows "
+        f"({dict(by_difficulty)})",
+        f"- Row provenance: {dict(by_source)}",
         "",
-        "## Retrieval metrics (answerable rows)",
+        "## Headline metrics (spec §14)",
         "",
-        f"- **Recall@{K}: {recall:.1%}**  (expected doc appears in top {K})",
-        f"- **MRR: {mrr:.3f}**",
+        "| Metric | Value | Scored over |",
+        "|---|---|---|",
+        f"| Citation accuracy | {pct(payload['citation_accuracy'])} | "
+        f"{scored['citation_accuracy'].total if scored else 0} citations |",
+        f"| Temporal correctness | {pct(payload['temporal_correctness'])} | "
+        f"{scored['temporal_correctness'].total if scored else 0} date-scoped rows |",
+        f"| Refusal correctness | {pct(payload['refusal_correctness'])} | "
+        f"{scored['refusal_correctness'].total if scored else 0} out-of-scope rows |",
+        f"| Recall@{K} | {pct(payload['recall_at_5'])} | {retrieval['n']} answerable rows |",
+        f"| MRR | {num(payload['mrr'])} | {retrieval['n']} answerable rows |",
         "",
-        "| Question | Expected | Rank | Top-1 |",
-        "|---|---|---|---|",
+        "## How temporal correctness is scored",
+        "",
+        "A date-scoped row passes when the answer cites **no document that was not in",
+        "force at the reference date**. It is not required to cite the historical",
+        "document: the withdrawn predecessors are in the supersession graph, but their",
+        "PDFs are not chunked or embedded, so no retriever could return them. Scoring on",
+        '"did it find the old circular" would report a flat 0% that measures corpus',
+        "coverage rather than temporal reasoning.",
+        "",
     ]
-    for d in details:
-        rank = str(d["rank"]) if d["rank"] else "MISS"
-        lines.append(f"| {d['question'][:60]} | {', '.join(d['expected'])} | {rank} | {d['top']} |")
 
-    lines += ["", "## End-to-end generation sample", ""]
-    for g in gen_results:
-        mark = "✅" if g["citation_ok"] else "❌"
-        lines.append(f"### {mark} {g['question']}")
-        exp = g["expected"] or "(none — refusal expected)"
-        lines.append(f"- expected: {exp} · cited: {g['cited'] or '(none)'}")
-        lines.append(f"- answer: {g['answer'][:400]}")
-        lines.append("")
+    if scored:
+        for name in ("temporal_correctness", "refusal_correctness"):
+            m = scored[name]
+            if m.failures:
+                lines += [f"### {name} — failures ({len(m.failures)})", ""]
+                lines += [f"- {f}" for f in m.failures[:15]]
+                lines += [""]
 
-    report.write_text("\n".join(lines), encoding="utf-8")
-    print(f"Recall@{K}={recall:.1%}  MRR={mrr:.3f}  ({len(details)} answerable rows)")
-    print(f"Wrote {report}")
+    lines += [
+        "## Per-question retrieval rank",
+        "",
+        "| Question | Expected | Rank |",
+        "|---|---|---|",
+    ]
+    for d in retrieval["details"]:
+        lines.append(
+            f"| {d['question'][:58]} | {', '.join(d['expected'])} | "
+            f"{d['rank'] if d['rank'] else 'MISS'} |"
+        )
+
+    (REPORT_DIR / "golden_set_eval.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _record_eval_run(payload: dict) -> None:
+    """Persist to eval_runs. Never fails the eval over a logging problem."""
+    try:
+        from app.db.queries import get_connection, insert_eval_run
+
+        with get_connection() as conn:
+            insert_eval_run(
+                conn,
+                {
+                    "git_commit_sha": payload["git_commit_sha"],
+                    "retrieval_strategy": payload["strategy"],
+                    "golden_set_size": payload["golden_set_size"],
+                    "recall_at_5": payload["recall_at_5"],
+                    "mrr": payload["mrr"],
+                    "citation_accuracy": payload["citation_accuracy"],
+                    "temporal_correctness": payload["temporal_correctness"],
+                    "refusal_correctness": payload["refusal_correctness"],
+                    "raw_results_path": str(METRICS_JSON),
+                },
+            )
+        print("Recorded eval_runs row.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"(could not record eval_runs row: {type(exc).__name__}: {exc})")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

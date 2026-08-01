@@ -73,13 +73,106 @@ def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
     sql = """
         INSERT INTO query_logs (query_text, reference_date, in_force_docs,
                                 cited_doc_numbers, answer_text, degraded,
-                                verified_citations, latency_ms)
+                                verified_citations, latency_ms,
+                                prompt_tokens, completion_tokens, token_cost,
+                                groundedness_score, cache_hit, llm_model)
         VALUES (%(query_text)s, %(reference_date)s, %(in_force_docs)s,
                 %(cited_doc_numbers)s, %(answer_text)s, %(degraded)s,
-                %(verified_citations)s, %(latency_ms)s)
+                %(verified_citations)s, %(latency_ms)s,
+                %(prompt_tokens)s, %(completion_tokens)s, %(token_cost)s,
+                %(groundedness_score)s, %(cache_hit)s, %(llm_model)s)
+    """
+    # Tolerate callers that predate migration 0003's columns.
+    row = {
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "token_cost": None,
+        "groundedness_score": None,
+        "cache_hit": False,
+        "llm_model": None,
+        **rec,
+    }
+    with conn.cursor() as cur:
+        cur.execute(sql, row)
+
+
+def insert_feedback(
+    conn: psycopg.Connection,
+    query_log_id: str,
+    rating: int,
+    comment: str | None = None,
+) -> bool:
+    """Record feedback for a logged query; False if that query_log_id is unknown."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM query_logs WHERE id = %s", (query_log_id,))
+        if cur.fetchone() is None:
+            return False
+        cur.execute(
+            """
+            INSERT INTO query_feedback (query_log_id, rating, comment)
+            VALUES (%s, %s, %s)
+            """,
+            (query_log_id, rating, comment),
+        )
+        return True
+
+
+def insert_eval_run(conn: psycopg.Connection, rec: dict[str, Any]) -> str:
+    """Record one eval run (spec §9); returns its id.
+
+    Metrics that were not computed must be passed as None, never 0.0 — CI
+    compares against thresholds, and a missing metric recorded as zero would
+    fail the build for the wrong reason (or, worse, pass a later comparison).
+    """
+    sql = """
+        INSERT INTO eval_runs (git_commit_sha, retrieval_strategy, golden_set_size,
+                               recall_at_5, mrr, citation_accuracy, temporal_correctness,
+                               refusal_correctness, faithfulness, answer_relevancy,
+                               raw_results_path, notes)
+        VALUES (%(git_commit_sha)s, %(retrieval_strategy)s, %(golden_set_size)s,
+                %(recall_at_5)s, %(mrr)s, %(citation_accuracy)s, %(temporal_correctness)s,
+                %(refusal_correctness)s, %(faithfulness)s, %(answer_relevancy)s,
+                %(raw_results_path)s, %(notes)s)
+        RETURNING id
+    """
+    row = {
+        "git_commit_sha": None,
+        "retrieval_strategy": None,
+        "golden_set_size": None,
+        "recall_at_5": None,
+        "mrr": None,
+        "citation_accuracy": None,
+        "temporal_correctness": None,
+        "refusal_correctness": None,
+        "faithfulness": None,
+        "answer_relevancy": None,
+        "raw_results_path": None,
+        "notes": None,
+        **rec,
+    }
+    with conn.cursor() as cur:
+        cur.execute(sql, row)
+        return str(cur.fetchone()[0])
+
+
+def latest_eval_run(conn: psycopg.Connection) -> dict | None:
+    """Most recent eval run, for GET /api/eval/latest."""
+    sql = """
+        SELECT id, git_commit_sha, run_at, retrieval_strategy, golden_set_size,
+               recall_at_5, mrr, citation_accuracy, temporal_correctness,
+               refusal_correctness, faithfulness, answer_relevancy, notes
+        FROM eval_runs ORDER BY run_at DESC LIMIT 1
     """
     with conn.cursor() as cur:
-        cur.execute(sql, rec)
+        cur.execute(sql)
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [c.name for c in cur.description]
+        out = dict(zip(cols, row))
+        out["id"] = str(out["id"])
+        out["run_at"] = out["run_at"].isoformat() if out["run_at"] else None
+        return out
 
 
 def list_documents(conn: psycopg.Connection) -> list[dict]:

@@ -22,12 +22,20 @@ semantically perfect but no longer in force.
 
 - **Cited answers.** Every factual claim cites a real document number; a
   post-generation **verify step flags hallucinated citations**.
-- **Temporal correctness (signature feature).** A supersession graph + a
-  pre-retrieval temporal filter compute the set of documents *in force at a given
-  date*. Ask "as of June 2024" and it refuses to cite the Nov-2025 Master Direction.
+- **Temporal correctness (signature feature).** A supersession graph built from
+  RBI's own published withdrawal list — **574 withdrawn NBFC circulars, 426 with
+  issue dates verified from each circular's own page** — plus a pre-retrieval
+  temporal filter that computes the set of documents *in force at a given date*.
+  Ask "as of June 2024" and the Nov-2025 Master Direction is excluded before
+  similarity search ever runs.
 - **Agentic pipeline (LangGraph).** `classify → resolve_temporal → retrieve →
-  generate → verify → respond`, with out-of-scope questions routed to a refusal.
+  expand → generate → verify → groundedness → respond`, with out-of-scope
+  questions routed to a refusal.
 - **Hybrid retrieval + reranking**, ablated honestly (see below).
+- **Measured, not asserted.** Per-node latency and per-query token cost are
+  recorded on every request; the golden set carries **95 rows, 48 of them
+  date-scoped**; and a CI gate fails the build when a metric regresses past a
+  committed floor.
 - **Production touches.** API-key auth, rate limiting, PII-redacted query logging.
 
 ## Architecture
@@ -66,6 +74,23 @@ correct refusal on out-of-scope questions, temporal filter excludes not-yet-issu
 docs for past dates, and 3/3 prompt-injection attempts resisted
 ([report](evals/reports/injection_test.md)).
 
+### Metrics not yet measured
+
+Stated explicitly rather than left as an implication — the harness for each is
+built and tested, but the numbers are pending a run against the ingested corpus:
+
+| Metric | Status |
+|---|---|
+| Citation accuracy | harness built ([scorer](evals/project_metrics.py)), not yet run |
+| Temporal correctness | harness built, not yet run |
+| Refusal correctness | harness built, not yet run |
+| Faithfulness / answer relevancy | last run failed 6/6 on LLM rate limits and is reported as `n/a`, not `0.0` ([report](evals/reports/generation_metrics.md)) |
+
+Why the table exists at all: a metric with no number is more useful to a reader
+than a number nobody can reproduce. See
+[ADR 0007](docs/adr/0007-metrics-that-can-fail.md) for the rules these metrics
+follow — including why "not measured" is `null` and never `0.0`.
+
 ## Quickstart (< 5 commands)
 
 ```bash
@@ -96,5 +121,20 @@ interface** (see [ADR 0006](docs/adr/0006-swappable-models-behind-interfaces.md)
 
 ## Status
 
-Phases 0–2 complete; Phase 3 (production-readiness) in progress. Build plan:
-[docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) §18.
+Phase 0–1 complete. Phase 2 complete except RAGAS integration. Phase 3 in
+progress: eval-gated CI, cost/latency instrumentation, API-key auth, rate
+limiting, PII redaction, and prompt-injection hardening are in; a live public
+demo is not. Build plan: [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) §18.
+
+Known gaps, kept here rather than discovered by a reader:
+
+- **Langfuse export is optional and unverified against a live instance.** Per-node
+  latency is recorded in-process regardless, so the numbers don't depend on it.
+- **Withdrawn circulars are metadata-only.** Their PDFs aren't chunked or
+  embedded, so a past-date query correctly declines rather than quoting the
+  historical text. This bounds how temporal correctness is scored — see
+  [ADR 0007](docs/adr/0007-metrics-that-can-fail.md).
+- **CI enforces the eval *contract* on every PR** (golden-set composition, scorer
+  behavior, gate logic) and the *measured* thresholds when a metrics file is
+  present; a clean runner has no corpus and must not scrape RBI to build one.
+- **SEBI is not ingested.** RBI NBFC Master Directions only.
