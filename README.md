@@ -54,7 +54,53 @@ semantically perfect but no longer in force.
 
 ## Eval results (real, measured, reported honestly)
 
-Retrieval ablation on a 30-question golden set (K=5) —
+### The corpus and the graph
+
+| | Count |
+|---|---|
+| NBFC Master Directions indexed (Nov 2025 consolidation) | **30** |
+| Chunks embedded in Qdrant | **868** |
+| Withdrawn circulars ingested from RBI's published index | **574** |
+| …of those, issue date verified from the circular's own page | **426** |
+| Documents in Postgres (30 active + 464 superseded) | **494** |
+| Supersession edges | **103** |
+
+### The temporal filter, measured against the real graph
+
+The number of documents in force, by reference date — the Nov-2025 consolidation
+visible as a single-day event:
+
+| Reference date | In force | of which Nov-2025 MDs |
+|---|---|---|
+| 2018-06-30 | 430 | **0** |
+| 2024-06-30 | 460 | **0** |
+| 2025-11-27 | 465 | **0** |
+| **2025-11-28** | **30** | **30** |
+| 2026-08-01 | 30 | 30 |
+
+End-to-end, the same question at two dates:
+
+```
+"What is the periodic KYC updation cycle for a low-risk NBFC customer?"
+
+  as of today       →  30 docs in force  →  cites RBI/DOR/2025-26/361, 10-year cycle
+  as of 2024-06-30  → 460 docs in force  →  cites nothing: "the reference context
+                                            does not contain any information"
+```
+
+The 2025 Master Direction is excluded *before* similarity search runs, so it
+cannot be retrieved for a 2024 question however well it matches the text.
+
+### Retrieval
+
+Measured on the 95-row golden set (37 answerable rows, K=5):
+
+| Metric | Value |
+|---|---|
+| **Recall@5** | **94.6%** |
+| **MRR** | **0.794** |
+
+Strategy ablation on the earlier 30-question set —
 [full report](evals/reports/ablation_retrieval.md):
 
 | Strategy | Recall@5 | MRR |
@@ -69,27 +115,33 @@ not beat it in aggregate, and we default to the measured-best rather than the
 fanciest (spec's honesty requirement). See
 [ADR 0002](docs/adr/0002-why-hybrid-retrieval.md) for the analysis.
 
-Other verified behaviors: correct citations + disclaimer on answerable questions,
-correct refusal on out-of-scope questions, temporal filter excludes not-yet-issued
-docs for past dates, and 3/3 prompt-injection attempts resisted
-([report](evals/reports/injection_test.md)).
+### Generation metrics — run in progress
 
-### Metrics not yet measured
-
-Stated explicitly rather than left as an implication — the harness for each is
-built and tested, but the numbers are pending a run against the ingested corpus:
+The harness is built, unit-tested, and currently executing against the corpus;
+numbers land in [`evals/reports/golden_set_eval.md`](evals/reports/) and
+`latest_metrics.json`. They are deliberately absent here rather than estimated.
 
 | Metric | Status |
 |---|---|
-| Citation accuracy | harness built ([scorer](evals/project_metrics.py)), not yet run |
-| Temporal correctness | harness built, not yet run |
-| Refusal correctness | harness built, not yet run |
-| Faithfulness / answer relevancy | last run failed 6/6 on LLM rate limits and is reported as `n/a`, not `0.0` ([report](evals/reports/generation_metrics.md)) |
+| Citation accuracy | scored by [`project_metrics.py`](evals/project_metrics.py); run in progress |
+| Temporal correctness | run in progress |
+| Refusal correctness | run in progress |
+| Injection resistance / hallucination rate | [35-case red-team suite](evals/red_team.py) built; run pending |
+| Faithfulness / answer relevancy | last run failed 6/6 on rate limits, reported as `n/a` not `0.0` ([report](evals/reports/generation_metrics.md)) |
 
-Why the table exists at all: a metric with no number is more useful to a reader
-than a number nobody can reproduce. See
-[ADR 0007](docs/adr/0007-metrics-that-can-fail.md) for the rules these metrics
-follow — including why "not measured" is `null` and never `0.0`.
+**Why this section is worth reading.** The first full run of this harness
+reported *temporal correctness 100%* — and it was false. An expired API key sent
+every generation down the agent's graceful-degradation path, which returns a
+well-formed response containing no answer instead of raising. Nothing was cited
+anywhere, and since a date-scoped row passes by not citing anything wrong, all 48
+temporal rows passed trivially. The giveaway was the combination: a system truly
+scoring 100% on temporal correctness cannot also produce zero citations.
+
+The harness now excludes degraded answers, refuses to report at all when fewer
+than half the rows survive, and has a regression test pinning both.
+[ADR 0007](docs/adr/0007-metrics-that-can-fail.md) records the incident and the
+four rules that follow from it — chiefly that "not measured" is `null` and never
+`0.0`, while a measured `0.0` still fails the CI gate.
 
 ## Quickstart (< 5 commands)
 
