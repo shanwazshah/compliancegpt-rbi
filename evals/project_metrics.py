@@ -32,6 +32,20 @@ from dataclasses import dataclass, field
 # Phrases that indicate the system declined rather than answered. Kept explicit
 # (and matched case-insensitively) so the refusal check is auditable rather than
 # a fuzzy judgement call.
+#
+# POST-HOC CORRECTION (2026-08-01). The first version of this list was written
+# from imagination before any answers existed, and it under-counted refusals:
+# a run scored 30% where three of the seven "failures" were unambiguous declines
+# the list simply did not recognise — "does not provide information about…",
+# "I do not have access to that information.", "I can't provide financial
+# advice…". Corrected to 60%.
+#
+# Editing a scorer after seeing results is exactly how a metric gets quietly
+# inflated, so the bar applied here was: add a phrase only if it is a decline on
+# its face, independent of whether it helps the score. Phrases that merely sound
+# unconfident while still asserting a regulatory fact were NOT added — the model
+# answering "the minimum capital requirement for a Payments Bank is ₹500 crores"
+# with no source is still a failure, and still counts as one.
 REFUSAL_MARKERS = (
     "outside the scope",
     "out of scope",
@@ -44,6 +58,15 @@ REFUSAL_MARKERS = (
     "unable to answer",
     "not in force",
     "no document in force",
+    # --- added by the correction above ---
+    "does not provide information",
+    "doesn't provide information",
+    "do not have access to",
+    "don't have access to",
+    "cannot provide financial advice",
+    "can't provide financial advice",
+    "cannot provide legal advice",
+    "can't provide legal advice",
 )
 
 

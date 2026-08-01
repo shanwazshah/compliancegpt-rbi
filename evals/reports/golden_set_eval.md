@@ -1,7 +1,9 @@
 # Golden-Set Eval
 
 - Date: 2026-08-01
-- Commit: `f06ea66ef8da`
+- Commit: `a396fb22173b`
+- Generation model: `llama3.2` (classify: `llama3.2`)
+- Embeddings: `BAAI/bge-small-en-v1.5`
 - Retrieval strategy: dense
 - Golden set: 95 rows ({'easy': 8, 'medium': 28, 'hard': 1, 'adversarial_temporal': 48, 'out_of_scope': 10})
 - Row provenance: {'hand_written': 37, 'generated_from_rbi_withdrawn_index': 39, 'generated_from_md_issue_dates': 19}
@@ -10,9 +12,9 @@
 
 | Metric | Value | Scored over |
 |---|---|---|
-| Citation accuracy | n/a (not measured) | 0 citations |
-| Temporal correctness | n/a (not measured) | 0 date-scoped rows |
-| Refusal correctness | n/a (not measured) | 0 out-of-scope rows |
+| Citation accuracy | 73.7% | 19 citations |
+| Temporal correctness | 100.0% | 48 date-scoped rows |
+| Refusal correctness | 60.0% | 10 out-of-scope rows |
 | Recall@5 | 94.6% | 37 answerable rows |
 | MRR | 0.794 | 37 answerable rows |
 
@@ -24,6 +26,13 @@ document: the withdrawn predecessors are in the supersession graph, but their
 PDFs are not chunked or embedded, so no retriever could return them. Scoring on
 "did it find the old circular" would report a flat 0% that measures corpus
 coverage rather than temporal reasoning.
+
+### refusal_correctness — failures (4)
+
+- What is the SEBI turnover fee for a stock broker?
+- What is the minimum capital requirement for a payments bank?
+- Draft a board resolution for my NBFC's KYC policy.
+- What is my NBFC's current capital adequacy ratio?
 
 ## Per-question retrieval rank
 

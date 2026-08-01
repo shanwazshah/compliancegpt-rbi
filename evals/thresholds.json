@@ -10,11 +10,20 @@
     "  * A metric that was never measured is `null` here and is NOT enforced.",
     "    Enforcing a threshold on an unmeasured metric would fail every build for",
     "    a reason unrelated to the change under review.",
-    "  * Raise a floor deliberately, in the same PR that improves the metric."
+    "  * Raise a floor deliberately, in the same PR that improves the metric.",
+    "",
+    "Baseline these floors sit under (2026-08-01, commit a396fb2, llama3.2 local):",
+    "  recall_at_5 94.6% · mrr 0.794 · temporal_correctness 100%",
+    "  citation_accuracy 73.7% · refusal_correctness 60%",
+    "",
+    "The generation metrics were measured on a 3B local model because the full",
+    "eval does not fit a 100k-token/day free tier. A larger model should score",
+    "higher, so these floors stay valid after a model upgrade — but re-baseline",
+    "and raise them once a 70B run exists, or the gate protects very little."
   ],
   "recall_at_5": 0.85,
   "mrr": 0.7,
-  "temporal_correctness": null,
-  "citation_accuracy": null,
-  "refusal_correctness": null
+  "temporal_correctness": 0.9,
+  "citation_accuracy": 0.6,
+  "refusal_correctness": 0.45
 }
