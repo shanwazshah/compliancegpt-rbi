@@ -43,6 +43,15 @@ PRICES: dict[str, tuple[float, float]] = {
     # --- Groq (default provider for this project) ---
     "llama-3.3-70b-versatile": (0.59, 0.79),
     "llama-3.1-8b-instant": (0.05, 0.08),
+    # --- Local (Ollama) ---
+    # Zero API cost, which is the thing this table measures. It is NOT zero
+    # *compute* cost — local inference spends electricity and wall-clock time
+    # instead of dollars. A cost-per-query of $0.00 on a local model should be
+    # read as "no vendor bill", not as "free".
+    "llama3.2": (0.0, 0.0),
+    "llama3.1": (0.0, 0.0),
+    "qwen2.5": (0.0, 0.0),
+    "mistral": (0.0, 0.0),
 }
 
 
