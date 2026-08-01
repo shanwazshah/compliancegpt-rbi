@@ -25,7 +25,25 @@ nothing would score as a pass, including an answer that simply failed to retriev
 "Temporal correctness" computed over that row would have been a number that no
 incorrect system could lose points on.
 
-The pattern behind both: **a metric is only worth reporting if there is a
+**Incident 3 — an outage that scored as a perfect run.** With the rules below
+already written and enforced, the first full golden-set eval reported
+**temporal correctness 100%**. It was false. The LLM API key had expired, so
+every generation hit the agent's graceful-degradation path (spec §15), which
+catches the failure and returns `degraded=True` *instead of raising*. The harness
+only excluded rows that raised. Nothing was cited on any row — and because a
+date-scoped row passes by citing nothing wrong, all 48 passed trivially. The
+same outage drove refusal correctness to 0% (the degradation notice does not
+read as a refusal) and citation accuracy to `null` (no citations at all), which
+is what exposed it: a system genuinely scoring 100% on temporal correctness
+cannot simultaneously produce zero citations.
+
+The lesson is narrower and more useful than the first two: **graceful
+degradation is an availability feature that quietly defeats measurement.** Every
+"never fail the request" path is a path that can hand an evaluator something that
+looks like an answer. Rule 3 below now covers degraded results explicitly, and
+rule 5 refuses to report metrics at all when too few rows survive.
+
+The pattern behind all three: **a metric is only worth reporting if there is a
 realistic way for it to come out badly.**
 
 ## Decision
@@ -53,13 +71,27 @@ return `None` from the scorer rather than a free pass. The golden-set test suite
 rejects a temporal row that has no date or nothing it forbids
 (`tests/test_golden_dataset.py::test_every_temporal_row_is_date_scoped_and_falsifiable`).
 
-### 3. Errors are excluded, not counted as failures
+### 3. Errors — *and degraded answers* — are excluded, not counted
 
 If the agent raises while evaluating a row, that row is dropped from the
 denominator and the exclusion count is printed. An outage is not a quality
 signal. This mirrors rule 1 in the opposite direction: just as a failed
 measurement must not become a zero, an infrastructure failure must not become a
 recorded regression.
+
+Crucially this includes rows where the agent **did not raise but returned
+`degraded=True`** — the graceful-degradation path. That path exists so a user
+gets retrieved passages when the LLM is down, which is right for serving and
+actively harmful for measurement: it hands the evaluator a well-formed response
+object containing no answer. Incident 3 above is exactly this, and
+`tests/test_project_metrics.py::test_harness_excludes_degraded_answers` pins it.
+
+### 5. Refuse to report a metric computed on a rump
+
+When fewer than half the rows produce a scorable answer, the run reports the
+project metrics as `null` rather than computing them over the survivors. A
+number from 4 of 95 rows is not a smaller measurement of the same thing — it is
+a different and unrepresentative one, and it will be read as the headline.
 
 ### 4. Metric definitions are pure functions with unit tests
 

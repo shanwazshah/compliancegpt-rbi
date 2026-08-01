@@ -125,6 +125,44 @@ def test_metric_that_measured_total_failure_is_zero_not_none():
     assert m.value == 0.0
 
 
+def test_harness_excludes_degraded_answers():
+    """A degraded answer is an outage, not an answer.
+
+    Regression test for a real incident: the agent catches LLM failures and
+    returns degraded=True instead of raising (spec §15 graceful degradation), so
+    the harness scored those rows as real answers. With the LLM down nothing was
+    cited, every "must not cite" row passed trivially, and the run reported
+    temporal correctness 100% off a total outage.
+    """
+    import evals.run_evals as harness
+
+    class FakeGraph:
+        @staticmethod
+        def run_agent(question, reference_date=None, use_cache=True):
+            return {
+                "answer": "The answer service is unavailable.",
+                "citations": [],
+                "degraded": True,
+            }
+
+    import sys
+    import types
+
+    fake = types.ModuleType("app.agent.graph")
+    fake.run_agent = FakeGraph.run_agent
+    original = sys.modules.get("app.agent.graph")
+    sys.modules["app.agent.graph"] = fake
+    try:
+        results = harness.end_to_end([{**temporal_row(), "expected_doc_numbers": []}])
+    finally:
+        if original is not None:
+            sys.modules["app.agent.graph"] = original
+        else:
+            del sys.modules["app.agent.graph"]
+
+    assert all("error" in r for r in results), "degraded rows must be excluded, not scored"
+
+
 def test_score_all_separates_the_three_metrics():
     results = [
         {"row": temporal_row(), "cited": [MD], "answer": ""},

@@ -33,6 +33,10 @@ METRICS_JSON = REPORT_DIR / "latest_metrics.json"
 K = 5
 DEFAULT_STRATEGY = "dense"      # the measured-best strategy (see ablation report)
 
+# Below this share of scorable rows, the project metrics are reported as NOT
+# MEASURED instead of being computed over whatever survived.
+MIN_SCORED_FRACTION = 0.5
+
 
 def load_golden() -> list[dict]:
     lines = GOLDEN.read_text(encoding="utf-8").splitlines()
@@ -108,12 +112,22 @@ def end_to_end(rows: list[dict], limit: int | None = None) -> list[dict]:
         try:
             # Cache off: a cache hit would score a stale answer, not this build's.
             out = run_agent(r["question"], r.get("reference_date"), use_cache=False)
+            # A DEGRADED answer is an outage, not an answer. The agent catches
+            # LLM failures and returns degraded=True rather than raising (spec
+            # §15 graceful degradation), so without this check a total LLM outage
+            # scores as a perfect run: nothing is cited, so every "must not cite"
+            # row trivially passes and temporal correctness reads 100%.
+            # That actually happened — see docs/adr/0007.
+            if out.get("degraded"):
+                raise RuntimeError(
+                    "generation degraded (LLM unavailable) — not a scorable answer"
+                )
             results.append(
                 {
                     "row": r,
                     "cited": [c["doc_number"] for c in out.get("citations", [])],
                     "answer": out.get("answer", ""),
-                    "degraded": out.get("degraded", False),
+                    "degraded": False,
                 }
             )
         except Exception as exc:  # noqa: BLE001
@@ -154,8 +168,22 @@ def main(argv: list[str] | None = None) -> None:
         excluded = len(results) - len(ok_results)
         if excluded:
             print(f"  {excluded} row(s) excluded: the agent errored, so they were not scored")
-        scored = score_all(ok_results, known_doc_numbers=_known_doc_numbers())
-        metrics = {name: m.value for name, m in scored.items()}
+
+        # Refuse to report metrics computed on a rump of surviving rows. A number
+        # from 4 of 95 rows is not a smaller measurement of the same thing — it is
+        # a different, unrepresentative one, and it will be read as the headline.
+        fraction = len(ok_results) / len(results) if results else 0.0
+        if fraction < MIN_SCORED_FRACTION:
+            print(
+                f"\n  !! Only {len(ok_results)}/{len(results)} rows produced a scorable "
+                f"answer ({fraction:.0%}). Reporting the project metrics as NOT MEASURED "
+                "rather than computing them over the survivors.\n"
+                "     Check the LLM provider/key, then re-run."
+            )
+            scored = {}
+        else:
+            scored = score_all(ok_results, known_doc_numbers=_known_doc_numbers())
+            metrics = {name: m.value for name, m in scored.items()}
 
     payload = {
         "date": date.today().isoformat(),
