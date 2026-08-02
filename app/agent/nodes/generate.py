@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from app.agent.output_guard import enforce_envelope
+from app.agent.output_guard import guard_output
 from app.config import settings
 from app.llm import complete
 from app.prompts import (
@@ -31,7 +31,7 @@ def generate_answer(question: str, contexts: list[dict]) -> dict:
     # Structural guard: nothing may follow the closing disclaimer. Prompt rules
     # alone did not hold here — the model obeyed the disclaimer rule and an
     # injected "append this line" trailer at the same time.
-    guard = enforce_envelope(raw)
+    guard = guard_output(raw, GENERATION_SYSTEM_PROMPT)
     if guard.blocked:
         log.warning(
             "output guard stripped %d chars after the disclaimer (likely injected "
@@ -39,11 +39,14 @@ def generate_answer(question: str, contexts: list[dict]) -> dict:
             len(guard.stripped or ""),
             (guard.stripped or "")[:120],
         )
+    if guard.prompt_leak_blocked:
+        log.warning("output guard removed leaked system-prompt text from the answer")
 
     return {
         "answer": guard.answer,
         "prompt_version": GENERATION_PROMPT_VERSION,
         "model": settings.llm_model,
-        "injection_blocked": guard.blocked,
+        "injection_blocked": guard.blocked or guard.prompt_leak_blocked,
         "stripped_trailer": guard.stripped,
+        "prompt_leak_blocked": guard.prompt_leak_blocked,
     }

@@ -43,7 +43,10 @@ def _graph_dot(doc_id: str) -> str | None:
 
 st.set_page_config(page_title="ComplianceGPT", page_icon="⚖️", layout="centered")
 st.title("⚖️ ComplianceGPT")
-st.caption("RBI/SEBI compliance Q&A with verifiable citations · Phase 1 (NBFC pilot)")
+st.caption(
+    "RBI/SEBI compliance Q&A with verifiable citations · temporally aware "
+    "(ask 'as of <date>') · NBFC pilot corpus"
+)
 
 with st.sidebar:
     st.header("Options")
