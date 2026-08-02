@@ -96,9 +96,19 @@ def retrieval_metrics(rows: list[dict], strategy: str = DEFAULT_STRATEGY) -> dic
     }
 
 
-def _row_key(row: dict) -> str:
-    """Stable identity for a golden row."""
-    return f"{row['question']}||{row.get('reference_date') or ''}"
+def _row_key(row: dict, model: str | None = None) -> str:
+    """Stable identity for a golden row *as answered by a specific model*.
+
+    The model is part of the key on purpose. Without it, resuming after a
+    provider switch would replay llama3.2 answers alongside freshly generated
+    70B ones and report the average as a single number — a silently mixed
+    measurement, which is worse than no measurement because nothing looks wrong.
+    """
+    if model is None:
+        from app.config import settings
+
+        model = settings.llm_model
+    return f"{model}||{row['question']}||{row.get('reference_date') or ''}"
 
 
 def load_cache() -> dict[str, dict]:
@@ -126,6 +136,8 @@ def load_cache() -> dict[str, dict]:
 def append_cache(key: str, row: dict, cited: list[str], answer: str, sha: str | None) -> None:
     """Append one scored row. Append-only so an interrupted run loses at most one."""
     CACHE.parent.mkdir(parents=True, exist_ok=True)
+    from app.config import settings
+
     rec = {
         "key": key,
         "question": row["question"],
@@ -133,6 +145,7 @@ def append_cache(key: str, row: dict, cited: list[str], answer: str, sha: str | 
         "cited": cited,
         "answer": answer,
         "git_commit_sha": sha,
+        "llm_model": settings.llm_model,
     }
     with CACHE.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")

@@ -126,3 +126,19 @@ def test_corrupt_cache_line_is_skipped_not_fatal(tmp_path, monkeypatch):
     monkeypatch.setattr(harness, "CACHE", cache)
     loaded = harness.load_cache()
     assert set(loaded) == {"a"}
+
+
+def test_cache_key_includes_the_model(monkeypatch):
+    """Resuming after a provider switch must not mix models into one metric.
+
+    Without the model in the key, a 70B re-run would replay cached llama3.2
+    answers and report the blend as a single number — a silently mixed
+    measurement, worse than none because nothing looks wrong.
+    """
+    import evals.run_evals as harness
+
+    row = {"question": "q", "reference_date": None}
+    small = harness._row_key(row, model="llama3.2")
+    large = harness._row_key(row, model="llama-3.3-70b-versatile")
+    assert small != large
+    assert "llama3.2" in small
