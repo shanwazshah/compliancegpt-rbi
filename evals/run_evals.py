@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from datetime import date
@@ -29,6 +30,11 @@ from evals.project_metrics import score_all
 
 GOLDEN = Path("evals") / "golden_dataset.jsonl"
 REPORT_DIR = Path("evals") / "reports"
+# `latest` is a pointer to the most recent run of ANY model. Per-model copies sit
+# beside it, because a quota-truncated run of one model must not destroy another
+# model's completed results — which is exactly what happened once: a 23/95 pass
+# on the 70B overwrote a finished llama3.2 report with nulls, leaving the README
+# citing numbers that no committed artifact backed any more.
 METRICS_JSON = REPORT_DIR / "latest_metrics.json"
 # Per-row results, so a quota-limited run can be resumed instead of restarted.
 CACHE = REPORT_DIR / "eval_cache.jsonl"
@@ -321,15 +327,34 @@ def main(argv: list[str] | None = None) -> None:
     }
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    METRICS_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    _write_report(rows, retrieval, scored, payload)
+    slug = re.sub(r"[^a-z0-9]+", "-", payload["llm_model"].lower()).strip("-")
+    body = json.dumps(payload, indent=2)
+
+    # Per-model artifacts are only written when the run actually measured
+    # something, so a truncated pass leaves the last complete run for that model
+    # intact. `latest_*` always reflects the most recent attempt.
+    measured = any(payload[m] is not None for m in metrics)
+    METRICS_JSON.write_text(body, encoding="utf-8")
+    _write_report(rows, retrieval, scored, payload, REPORT_DIR / "golden_set_eval.md")
+    if measured:
+        (REPORT_DIR / f"metrics_{slug}.json").write_text(body, encoding="utf-8")
+        _write_report(
+            rows, retrieval, scored, payload, REPORT_DIR / f"golden_set_eval_{slug}.md"
+        )
+    else:
+        print(
+            f"  (no metric measured — kept any existing metrics_{slug}.json rather than "
+            "overwriting a complete run with nulls)"
+        )
     _record_eval_run(payload)
 
     print("\n" + json.dumps(payload, indent=2))
     print(f"Wrote {METRICS_JSON}")
 
 
-def _write_report(rows: list[dict], retrieval: dict, scored: dict, payload: dict) -> None:
+def _write_report(
+    rows: list[dict], retrieval: dict, scored: dict, payload: dict, out: Path
+) -> None:
     import collections
 
     by_difficulty = collections.Counter(r["difficulty"] for r in rows)
@@ -398,7 +423,7 @@ def _write_report(rows: list[dict], retrieval: dict, scored: dict, payload: dict
             f"{d['rank'] if d['rank'] else 'MISS'} |"
         )
 
-    (REPORT_DIR / "golden_set_eval.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _record_eval_run(payload: dict) -> None:
