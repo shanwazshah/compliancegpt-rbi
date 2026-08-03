@@ -12,6 +12,7 @@ This makes the pipeline traceable and each node independently testable.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from langgraph.graph import END, START, StateGraph
@@ -27,6 +28,8 @@ from app.db.queries import get_connection
 from app.observability.tracing import span
 from app.retrieval.retrieve import retrieve
 from app.retrieval.temporal_filter import in_force_doc_numbers
+
+log = logging.getLogger(__name__)
 
 DISCLAIMER = "This is decision-support information, not legal advice."
 
@@ -81,6 +84,10 @@ def _generate(state: AgentState) -> dict:
             s.note(model=gen["model"], degraded=False)
             return {"answer": gen["answer"], "model": gen["model"], "degraded": False}
         except Exception as exc:  # graceful degradation (spec §15)
+            # The degraded answer text carries the reason too, but callers (e.g.
+            # the eval harness) discard that text once they see degraded=True —
+            # log here so the real cause isn't lost, only "degraded" is.
+            log.warning("generate degraded: %s: %s", type(exc).__name__, exc)
             s.note(degraded=True, reason=type(exc).__name__)
             return {
                 "answer": (
