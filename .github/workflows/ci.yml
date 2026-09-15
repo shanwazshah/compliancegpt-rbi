@@ -41,13 +41,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,vector]"
 
       - name: Apply database migrations
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
           for f in migrations/*.sql; do
-            psql "$DATABASE_URL" -f "$f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
 
       - name: Lint (ruff)
@@ -121,3 +121,26 @@ jobs:
       - name: Threshold gate
         if: steps.changed.outputs.relevant == 'true'
         run: python -m evals.gate
+
+
+  vectorless:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install without vector dependencies
+        run: pip install -c constraints/vectorless-py312.txt -e ".[dev,pageindex]"
+      - name: Confirm vector dependencies are absent
+        run: |
+          python - <<'PY'
+          import importlib.util
+          for name in ("torch", "sentence_transformers", "qdrant_client", "rank_bm25"):
+              assert importlib.util.find_spec(name) is None, name
+          from app.main import app
+          PY
+      - name: Vectorless API and retrieval contracts
+        run: |
+          pytest -q tests/test_advanced_foundation.py tests/test_pageindex_retrieval.py \
+                    tests/test_vectorless_agent.py

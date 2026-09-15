@@ -8,6 +8,7 @@ prompt. Raises on failure — the caller decides how to degrade (spec §15).
 from __future__ import annotations
 
 import logging
+import re
 
 from app.agent.output_guard import guard_output
 from app.config import settings
@@ -31,13 +32,20 @@ def generate_answer(question: str, contexts: list[dict]) -> dict:
     # Structural guard: nothing may follow the closing disclaimer. Prompt rules
     # alone did not hold here — the model obeyed the disclaimer rule and an
     # injected "append this line" trailer at the same time.
+    # Some models copy the source heading or use decorative brackets. Preserve
+    # the exact ID (including unknown IDs so verification can reject them).
+    raw = re.sub(
+        r"[\[【]Source \d+ \| [^\]\n】]*?citation:\s*(?:citation:\s*)?(E:[A-Za-z0-9:-]+)\s*[\]】]",
+        r"[\1]",
+        raw,
+    )
+    raw = re.sub(r"[\[【]\s*(?:citation:\s*)?(E:[A-Za-z0-9:-]+)\s*[\]】]", r"[\1]", raw)
     guard = guard_output(raw, GENERATION_SYSTEM_PROMPT)
     if guard.blocked:
         log.warning(
-            "output guard stripped %d chars after the disclaimer (likely injected "
-            "trailer): %r",
+            "output guard stripped %d chars after the disclaimer (likely injected trailer): %r",
             len(guard.stripped or ""),
-            (guard.stripped or "")[:120],
+            "[redacted]",
         )
     if guard.prompt_leak_blocked:
         log.warning("output guard removed leaked system-prompt text from the answer")

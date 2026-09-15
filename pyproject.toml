@@ -11,15 +11,12 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "psycopg[binary]>=3.2",      # PostgreSQL driver (psycopg v3)
-    "qdrant-client>=1.12",       # vector DB client
     # ---- ingestion plane ----
     "httpx>=0.27",               # HTTP client for the scraper
     "beautifulsoup4>=4.12",      # HTML parsing of RBI listing pages
     "lxml>=5.3",                 # fast HTML/XML parser backend for bs4
     "pdfplumber>=0.11",          # PDF text extraction (low-memory parser)
     # ---- retrieval ----
-    "sentence-transformers>=3.0",# embeddings + cross-encoder reranker
-    "rank-bm25>=0.2",            # BM25 lexical retrieval (hybrid + RRF)
     # ---- agent + LLM ----
     "langgraph>=0.2",            # agent state machine (classify->...->respond)
     "openai>=1.40",              # LLM via any OpenAI-compatible API (Groq default)
@@ -29,6 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vector = ["qdrant-client>=1.12", "sentence-transformers>=3.0", "rank-bm25>=0.2"]
+pageindex = ["pageindex==0.2.10"]
 dev = [
     "pytest>=8.3",
     "httpx>=0.27",               # test client for FastAPI
@@ -46,9 +45,9 @@ langfuse = ["langfuse>=2.0"]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-# Explicit package list keeps setuptools from scanning data/ and docs/.
-packages = ["app", "ingestion", "evals"]
+[tool.setuptools.packages.find]
+include = ["app*", "ingestion*", "evals*"]
+exclude = ["tests*", "data*", "docs*"]
 
 [tool.ruff]
 line-length = 100
@@ -60,3 +59,4 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires a migrated PostgreSQL database"]

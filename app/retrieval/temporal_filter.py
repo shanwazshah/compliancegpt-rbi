@@ -29,11 +29,15 @@ import psycopg
 # Shared by both queries below so the two can never drift apart.
 _IN_FORCE_PREDICATE = """
         WHERE d.issue_date <= %(ref)s
+          AND COALESCE(d.effective_date, d.issue_date) <= %(ref)s
+          AND d.status <> 'draft'
           AND (d.withdrawn_date IS NULL OR d.withdrawn_date > %(ref)s)
           AND NOT EXISTS (
               SELECT 1
               FROM supersession_edges e
               WHERE e.predecessor_doc_id = d.id
+                AND e.relation_type IN ('supersedes', 'consolidates')
+                AND e.extraction_method IN ('manual_verified', 'rbi_explicit_list')
                 AND e.effective_date IS NOT NULL
                 AND e.effective_date <= %(ref)s
           )

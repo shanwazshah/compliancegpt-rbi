@@ -1,0 +1,8 @@
+streamlit>=1.38,<2
+requests>=2.31
+pydantic>=2.9
+pydantic-settings>=2.6
+psycopg[binary]>=3.2
+langgraph>=0.2
+openai>=1.40
+anthropic>=0.40

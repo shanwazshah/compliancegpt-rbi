@@ -1,4 +1,13 @@
-# ComplianceGPT — Project Specification
+What I'm supposed to tell you is: for example, in PROJECT_SPEC.md, everything is divided. For example, what is the system architecture? I will get:
+- what technologies I used here
+- what the ingestion pipeline is
+- what the API contract is
+- what advanced RAG technique is used
+- what evaluation methods are used
+- what observability is
+- how to tell you it is a gateway to look into other things
+For example, if I want to see what it actually did in evals, I can go directly into evals. I can see the code I wrote, and it is a gateway for the project. For example, if I have vibe-coded it, I can see the overall picture of the project. I can go into the sub-thing in it, and you are getting, right, what I am telling.
+If I see the architecture first, there is an ingestion plane, so I can get a constant context of what I did in injection. In that way, I'm telling you that I will go through it thoroughly. I will go into each layer in the architecture. For example, the first thing is the ingestion plane, so what actually I did, I will go into the ingestion block. I will see whatever code it has written, so I will get the context. I can talk in the interview very confidently. What do you think?# ComplianceGPT — Project Specification
 
 **A Temporally-Aware Agentic RAG System for RBI/SEBI Regulatory Compliance**
 

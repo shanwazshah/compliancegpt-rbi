@@ -43,8 +43,7 @@ def _ensure_collection(client: QdrantClient) -> None:
         current = client.get_collection(name).config.params.vectors.size
         if current == settings.embedding_dim:
             return
-        print(f"Vector size changed ({current} -> {settings.embedding_dim}); recreating collection")
-        client.delete_collection(name)
+        raise ValueError("Embedding dimension changed; build a new named collection")
     client.create_collection(
         collection_name=name,
         vectors_config=qm.VectorParams(
@@ -63,7 +62,7 @@ def embed_document(client: QdrantClient, rec: dict) -> int:
     parent_text_by_index = {c.chunk_index: c.text for c in all_chunks if c.is_parent}
     children = [c for c in all_chunks if not c.is_parent]
     if not children:
-        return 0
+        raise ValueError("No child text extracted; existing index was not changed")
 
     vectors = embed_texts([c.text for c in children])
 
@@ -90,7 +89,22 @@ def embed_document(client: QdrantClient, rec: dict) -> int:
                 },
             )
         )
-    client.upsert(collection_name=settings.qdrant_collection, points=points)
+    client.upsert(collection_name=settings.qdrant_collection, points=points, wait=True)
+    # Remove obsolete indices only after replacement points were successfully written.
+    client.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=qm.FilterSelector(
+            filter=qm.Filter(
+                must=[
+                    qm.FieldCondition(
+                        key="doc_number", match=qm.MatchValue(value=rec["doc_number"])
+                    )
+                ],
+                must_not=[qm.HasIdCondition(has_id=[point.id for point in points])],
+            )
+        ),
+        wait=True,
+    )
     return len(points)
 
 

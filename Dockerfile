@@ -12,8 +12,12 @@ WORKDIR /app
 # Install a CPU-only torch first (much smaller than the default CUDA build),
 # then the project. Layer caching keeps rebuilds fast.
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -e .
+COPY app ./app
+COPY ingestion ./ingestion
+COPY evals ./evals
+ARG EXTRAS=vector
+RUN if [ "$EXTRAS" = "vector" ]; then pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; fi \
+    && pip install --no-cache-dir ".[${EXTRAS}]"
 
 # App code (data/ and .venv are excluded via .dockerignore).
 COPY . .
@@ -22,6 +26,6 @@ EXPOSE 8000
 
 # HTTP healthcheck against the readiness endpoint.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:8000/api/health || exit 1
+    CMD curl -fsS http://localhost:8000/api/ready || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

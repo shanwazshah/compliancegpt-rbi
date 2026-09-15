@@ -30,3 +30,28 @@ def test_empty_context_scores_zero():
 
 def test_empty_answer_scores_zero():
     assert compute_groundedness("", CONTEXT) == 0.0
+
+
+def test_swapped_risk_intervals_fail_local_claim_check():
+    answer = (
+        "High-risk customers update every eight years and medium-risk customers "
+        "update every two years."
+    )
+    assert compute_groundedness(answer, CONTEXT) == 0.0
+
+
+def test_word_and_digit_quantities_are_equivalent():
+    answer = "Low-risk customers update every ten years."
+    assert compute_groundedness(answer, CONTEXT) > 0.0
+
+
+def test_unsupported_negation_fails_local_claim_check():
+    context = [{"text": "The NBFC shall perform customer due diligence."}]
+    answer = "The NBFC shall not perform customer due diligence."
+    assert compute_groundedness(answer, context) == 0.0
+
+
+def test_supported_negation_is_not_rejected():
+    context = [{"text": "The NBFC shall not open anonymous accounts."}]
+    answer = "The NBFC shall not open anonymous accounts."
+    assert compute_groundedness(answer, context) > 0.8

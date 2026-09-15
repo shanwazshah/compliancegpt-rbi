@@ -1,0 +1,72 @@
+[
+  {
+    "source_version_id": "31a4e573-47ac-5851-95c4-e5f1c8764895",
+    "source_page": 41,
+    "predicate": "REQUIRES",
+    "label": "Periodic KYC updates by customer risk category",
+    "evidence_quote": "(1) The NBFC shall adopt a risk-based approach for periodic updation of KYC\nensuring that it keeps the information or data collected under CDD is kept up-to-date\nand relevant, particularly where there is high risk. However, the NBFC shall carry out\nperiodic updation at least once in every two years for high-risk customers, once in\nevery eight years for medium risk customers and once in every 10 years for low-risk\ncustomers from the date of opening of the account / last KYC updation. The NBFC\nshall document its policy in this regard as part of the NBFC’s internal KYC policy duly\napproved by the Board of Directors of NBFC or any committee of the Board to which\npower has been delegated."
+  },
+  {
+    "source_version_id": "31a4e573-47ac-5851-95c4-e5f1c8764895",
+    "source_page": 41,
+    "predicate": "HAS_EXCEPTION",
+    "label": "Low-risk individual customer update extension and monitoring",
+    "evidence_quote": "(2) Notwithstanding the provisions given above, in respect of an individual\ncustomer who is categorised as low-risk, the NBFC shall allow all transactions and\nensure the updation of KYC within one year of its falling due for KYC or up to June 30,\n2026, whichever is later. The NBFC shall subject accounts of such customers to\nregular monitoring. This shall also apply to low-risk individual customers for whom\nperiodic updation of KYC has already fallen due."
+  },
+  {
+    "source_version_id": "20e43579-c017-5eec-bdf2-c3402c277641",
+    "source_page": 11,
+    "predicate": "DEFINES",
+    "label": "Top Layer expected state",
+    "evidence_quote": "13. The Top Layer will ideally remain empty."
+  },
+  {
+    "source_version_id": "20e43579-c017-5eec-bdf2-c3402c277641",
+    "source_page": 14,
+    "predicate": "DEFINES",
+    "label": "Upper Layer asset-size threshold",
+    "evidence_quote": "24. 10[The Upper Layer shall consist of NBFCs having asset size of ₹1,00,000 crore\nand above as per the latest audited balance sheet for the financial year.]"
+  },
+  {
+    "source_version_id": "20e43579-c017-5eec-bdf2-c3402c277641",
+    "source_page": 21,
+    "predicate": "REQUIRES",
+    "label": "Net Owned Fund for NBFC-ICC, NBFC-MFI and NBFC-Factor",
+    "evidence_quote": "39. In exercise of the powers conferred under clause (b) of sub-section (1) of section\n45IA of the RBI Act,1934 and all the powers enabling it in that behalf, the Reserve Bank,\nhereby specifies ₹10 crore as the Net Owned Fund (NOF) required for an NBFC-ICC,\nNBFC-MFI and NBFC-Factor to commence or carry on the business of non-banking\nfinancial institution."
+  },
+  {
+    "source_version_id": "275d4328-ccb4-5c92-926d-770f3a662edc",
+    "source_page": 4,
+    "predicate": "REQUIRES",
+    "label": "Prior approval for takeover, control or 26 percent shareholding change",
+    "evidence_quote": "6. An NBFC shall require prior written permission of the Reserve Bank for the\nfollowing:\n(1) Any takeover or acquisition of control of the NBFC, which may or may not result\nin change of management;\n(2) Any change in the shareholding of the NBFC, including progressive increases\nover time, which would result in acquisition/ transfer of shareholding of 26\npercent or more of the paid-up equity capital of the NBFC."
+  },
+  {
+    "source_version_id": "256c84c0-0108-517d-aee9-53e2a61735b8",
+    "source_page": 4,
+    "predicate": "REQUIRES",
+    "label": "RBI NOC before approaching a Court or Tribunal for amalgamation",
+    "evidence_quote": "However, an NBFC shall seek No Objection Certificate (NOC) / prior\napproval of RBI before approaching any Court or Tribunal seeking orders for\namalgamation as set out hereunder:"
+  },
+  {
+    "source_version_id": "896a2edf-3731-57c8-a386-5e3eb614fff0",
+    "source_page": 4,
+    "predicate": "HAS_EXCEPTION",
+    "label": "Domestic branch opening generally does not need prior RBI approval",
+    "evidence_quote": "5. 2An NBFC is generally permitted to open branches without having the need to\nobtain prior approval from RBI, unless otherwise specifically restricted."
+  },
+  {
+    "source_version_id": "896a2edf-3731-57c8-a386-5e3eb614fff0",
+    "source_page": 5,
+    "predicate": "REQUIRES",
+    "label": "Three-month public notice before branch closure",
+    "evidence_quote": "11. NBFCs shall give at least three months public notice prior to the date of closure\nof any of its branches/offices in, at least, one leading national newspaper and a\nleading local (covering the place of branch/ office) vernacular newspaper\nindicating therein the purpose and arrangements being made to service the\ndepositors, etc."
+  },
+  {
+    "source_version_id": "896a2edf-3731-57c8-a386-5e3eb614fff0",
+    "source_page": 5,
+    "predicate": "REQUIRES",
+    "label": "Prior approval for an overseas representative office",
+    "evidence_quote": "13. 5Prior approval of RBI shall be obtained in cases of opening of representative\noffice abroad by an NBFC. Such applications shall be made using the\nPRAVAAH portal (https://pravaah.rbi.org.in)."
+  }
+]

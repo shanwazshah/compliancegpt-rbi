@@ -14,6 +14,8 @@ import pytest
 from app.db.queries import get_connection
 from app.retrieval.temporal_filter import in_force_doc_numbers
 
+pytestmark = pytest.mark.integration
+
 OLD = "TEST/OLD/KYC-2016"
 NEW = "TEST/NEW/KYC-2025"
 EFFECTIVE = date(2025, 11, 28)  # the real consolidation date

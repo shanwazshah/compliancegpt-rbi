@@ -13,6 +13,10 @@ class AgentState(TypedDict, total=False):
     # inputs
     question: str
     reference_date: str | None
+    strategy: str
+    use_cache: bool
+    cache_key: tuple
+    corpus_revision: str
     # classify
     in_scope: bool
     # resolve_temporal

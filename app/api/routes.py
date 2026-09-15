@@ -6,25 +6,37 @@ reports each. A health check that actually probes dependencies is what lets an
 orchestrator (or you) know the system is *ready*, not merely *running*.
 """
 
-from fastapi import APIRouter, Depends
+from datetime import date
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.security import rate_limit, require_api_key
 from app.config import settings
+from app.retrieval.types import VECTOR_STRATEGIES, RetrievalStrategy
 
 router = APIRouter(prefix="/api")
 
 
 # ---- /api/query request & response schemas (spec §12) ----
 class QueryRequest(BaseModel):
-    question: str = Field(..., min_length=3, description="Natural-language compliance question")
-    reference_date: str | None = Field(None, description="ISO date; null = as of today")
+    question: str = Field(
+        ..., min_length=3, max_length=6000, description="Natural-language compliance question"
+    )
+    reference_date: date | None = Field(None, description="ISO date; null = as of today")
+    strategy: RetrievalStrategy | None = None
 
 
 class Citation(BaseModel):
     doc_number: str
     title: str
     url: str
+    evidence_id: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    evidence_url: str | None = None
 
 
 class RetrievedSource(BaseModel):
@@ -32,6 +44,11 @@ class RetrievedSource(BaseModel):
     title: str
     section_heading: str | None = None
     score: float
+    evidence_id: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    evidence_url: str | None = None
+    text: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -44,16 +61,20 @@ class QueryResponse(BaseModel):
     degraded: bool
     verified_citations: bool = True
     hallucinated_citations: list[str] = []
-    groundedness: float | None = None   # 0..1 support of answer by context
-    low_confidence: bool = False        # groundedness < threshold
+    groundedness: float | None = None  # 0..1 support of answer by context
+    low_confidence: bool = False  # groundedness < threshold
     cached: bool = False
     latency_ms: int | None = None
-    node_timings: dict[str, float] | None = None   # per-node ms (spec §15)
+    node_timings: dict[str, float] | None = None  # per-node ms (spec §15)
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     # None (not 0.0) when the model's price isn't in the table — an unmeasured
     # cost must never be reported as a free one.
     cost_usd: float | None = None
+    retrieval_strategy: str | None = None
+    corpus_revision: str | None = None
+    graph_paths: list[dict] = Field(default_factory=list)
+    query_log_id: str | None = None
 
 
 def _check_postgres() -> bool:
@@ -90,13 +111,33 @@ def health() -> dict:
     """
     services = {
         "postgres": "up" if _check_postgres() else "down",
-        "qdrant": "up" if _check_qdrant() else "down",
+        "qdrant": ("up" if _check_qdrant() else "down")
+        if settings.retrieval_strategy in VECTOR_STRATEGIES
+        else "not_required",
     }
     return {
         "status": "ok",
         "service": "compliancegpt-api",
         "services": services,
     }
+
+
+@router.get("/ready")
+def readiness():
+    status = health()
+    ready = all(value in {"up", "not_required"} for value in status["services"].values())
+    if ready and settings.retrieval_strategy not in VECTOR_STRATEGIES:
+        from app.db.queries import get_connection
+
+        try:
+            with get_connection() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM evidence_pages LIMIT 1")
+                ready = cur.fetchone() is not None
+        except Exception:
+            ready = False
+    return JSONResponse(
+        {**status, "status": "ready" if ready else "not_ready"}, status_code=200 if ready else 503
+    )
 
 
 @router.post(
@@ -119,7 +160,19 @@ def query(req: QueryRequest) -> QueryResponse:
     # returned in the payload, so "p95 latency" and "$/query" are measured
     # numbers rather than estimates.
     with cost_mod.capture() as usage, trace("query", reference_date=req.reference_date) as t:
-        result = run_agent(req.question, req.reference_date)
+        try:
+            result = run_agent(
+                req.question,
+                req.reference_date.isoformat() if req.reference_date else None,
+                strategy=req.strategy,
+            )
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("Query failed: %s", type(exc).__name__)
+            raise HTTPException(
+                503, "Query could not be completed safely; check service status"
+            ) from exc
         t.note(cached=result.get("cached"), degraded=result.get("degraded"))
 
     result = {
@@ -130,25 +183,25 @@ def query(req: QueryRequest) -> QueryResponse:
         "completion_tokens": usage.completion_tokens,
         "cost_usd": usage.cost_usd,
     }
-    _log_query(req, result)
+    result["query_log_id"] = _log_query(req, result)
     return QueryResponse(**result)
 
 
-def _log_query(req: QueryRequest, result: dict) -> None:
+def _log_query(req: QueryRequest, result: dict) -> str | None:
     """Best-effort query logging — never let logging break the response."""
     from app.db.queries import get_connection, insert_query_log
     from app.observability.redaction import redact
 
     try:
         with get_connection() as conn:
-            insert_query_log(
+            return insert_query_log(
                 conn,
                 {
                     "query_text": redact(req.question),
-                    "reference_date": req.reference_date,
+                    "reference_date": result.get("reference_date_used"),
                     "in_force_docs": result.get("in_force_docs"),
                     "cited_doc_numbers": [c["doc_number"] for c in result.get("citations", [])],
-                    "answer_text": result.get("answer"),
+                    "answer_text": redact(result.get("answer") or ""),
                     "degraded": result.get("degraded"),
                     "verified_citations": result.get("verified_citations"),
                     "latency_ms": result.get("latency_ms"),
@@ -178,12 +231,12 @@ def eval_latest() -> dict:
 
 
 class FeedbackRequest(BaseModel):
-    query_log_id: str
+    query_log_id: UUID
     rating: int = Field(..., ge=1, le=5)
     comment: str | None = Field(None, max_length=2000)
 
 
-@router.post("/feedback")
+@router.post("/feedback", dependencies=[Depends(require_api_key), Depends(rate_limit)])
 def feedback(req: FeedbackRequest) -> dict:
     """Record a rating against a logged query (spec §12).
 
@@ -199,12 +252,12 @@ def feedback(req: FeedbackRequest) -> dict:
         with get_connection() as conn:
             ok = insert_feedback(
                 conn,
-                query_log_id=req.query_log_id,
+                query_log_id=str(req.query_log_id),
                 rating=req.rating,
                 comment=redact(req.comment) if req.comment else None,
             )
     except Exception as exc:  # noqa: BLE001 - surface a clean 400 for a bad uuid
-        raise HTTPException(status_code=400, detail=f"could not record feedback: {exc}") from exc
+        raise HTTPException(status_code=400, detail="could not record feedback") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="query_log_id not found")
     return {"status": "recorded"}
@@ -220,7 +273,7 @@ def documents_list() -> list[dict]:
 
 
 @router.get("/documents/{doc_id}")
-def document_detail(doc_id: str) -> dict:
+def document_detail(doc_id: UUID) -> dict:
     """Document detail + its supersession history (predecessors & successors)."""
     from fastapi import HTTPException
 
@@ -235,7 +288,7 @@ def document_detail(doc_id: str) -> dict:
 
 
 @router.get("/documents/{doc_id}/supersession-graph")
-def supersession_graph(doc_id: str) -> dict:
+def supersession_graph(doc_id: UUID) -> dict:
     """Graph nodes/edges around this document, for visualization."""
     from fastapi import HTTPException
 
@@ -247,6 +300,7 @@ def supersession_graph(doc_id: str) -> dict:
             raise HTTPException(status_code=404, detail="document not found")
         history = supersession_history(conn, doc_id)
 
+    doc_id = str(doc_id)
     nodes = {doc_id: {"id": doc_id, "doc_number": doc["doc_number"], "title": doc["title"]}}
     edges = []
     for p in history["predecessors"]:
@@ -256,3 +310,25 @@ def supersession_graph(doc_id: str) -> dict:
         nodes[s["id"]] = {"id": s["id"], "doc_number": s["doc_number"], "title": s["title"]}
         edges.append({"from": doc_id, "to": s["id"], "relation": s["relation_type"]})
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+@router.get("/evidence/{version_id}/pages/{page_number}")
+def evidence_page(version_id: UUID, page_number: int = Path(ge=1)) -> dict:
+    """Inspect an exact historical source page; this endpoint does not assert applicability."""
+    from app.db.queries import get_connection
+    from app.evidence.repository import EvidenceRepository
+
+    with get_connection() as conn:
+        page = EvidenceRepository(conn).page_detail(str(version_id), page_number)
+    if not page:
+        raise HTTPException(404, "Evidence page not found")
+    return page
+
+
+@router.get("/evidence/{version_id}/tree")
+def evidence_tree(version_id: UUID) -> list[dict]:
+    from app.db.queries import get_connection
+    from app.evidence.repository import EvidenceRepository
+
+    with get_connection() as conn:
+        return EvidenceRepository(conn).nodes(str(version_id))

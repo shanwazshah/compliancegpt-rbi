@@ -19,6 +19,7 @@ Run:  python -m ingestion.parsing.pdf_to_structured
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -53,7 +54,9 @@ def parse_pdf(pdf_path: str | Path, *, force: bool = False) -> str:
     pdf_path = Path(pdf_path)
     PARSED_DIR.mkdir(parents=True, exist_ok=True)
     out = PARSED_DIR / (pdf_path.stem + ".md")
-    if out.exists() and not force:
+    digest = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    signature = out.with_suffix(".sha256")
+    if out.exists() and signature.exists() and signature.read_text() == digest and not force:
         return out.read_text(encoding="utf-8")
 
     lines: list[str] = []
@@ -70,6 +73,7 @@ def parse_pdf(pdf_path: str | Path, *, force: bool = False) -> str:
 
     markdown = "\n".join(lines).strip()
     out.write_text(markdown, encoding="utf-8")
+    signature.write_text(digest)
     return markdown
 
 

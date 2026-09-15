@@ -17,6 +17,7 @@ from datetime import date
 
 from langgraph.graph import END, START, StateGraph
 
+from app.agent.cache import ExactCache
 from app.agent.nodes.classify import classify_query
 from app.agent.nodes.expand import expand_context
 from app.agent.nodes.generate import generate_answer
@@ -24,10 +25,12 @@ from app.agent.nodes.groundedness import compute_groundedness
 from app.agent.nodes.verify import verify_citations
 from app.agent.state import AgentState
 from app.config import settings
-from app.db.queries import get_connection
+from app.db.queries import corpus_revision, get_connection
 from app.observability.tracing import span
+from app.prompts import GENERATION_PROMPT_VERSION
 from app.retrieval.retrieve import retrieve
 from app.retrieval.temporal_filter import in_force_doc_numbers
+from app.retrieval.types import STRATEGIES, VECTOR_STRATEGIES
 
 log = logging.getLogger(__name__)
 
@@ -49,16 +52,22 @@ def _resolve_temporal(state: AgentState) -> dict:
         ref_date = date.fromisoformat(ref) if ref else date.today()
         with get_connection() as conn:
             allowed = in_force_doc_numbers(conn, ref_date)
+            revision = corpus_revision(conn, state["strategy"] not in VECTOR_STRATEGIES)
         s.note(reference_date=ref_date.isoformat(), in_force_docs=len(allowed))
-    return {"ref_date_iso": ref_date.isoformat(), "allowed_doc_numbers": allowed}
+    return {
+        "ref_date_iso": ref_date.isoformat(),
+        "allowed_doc_numbers": allowed,
+        "corpus_revision": revision,
+    }
 
 
 def _retrieve(state: AgentState) -> dict:
-    with span("retrieve", strategy="dense", k=8) as s:
+    with span("retrieve", strategy=state["strategy"], k=8) as s:
         hits = retrieve(
             state["question"],
             k=8,
-            strategy="dense",
+            strategy=state["strategy"],
+            reference_date=state["ref_date_iso"],
             allowed_doc_numbers=state.get("allowed_doc_numbers"),
         )
         # Candidate doc numbers + scores are the single most useful thing to have
@@ -78,6 +87,13 @@ def _expand(state: AgentState) -> dict:
 
 
 def _generate(state: AgentState) -> dict:
+    if not state.get("hits"):
+        return {
+            "answer": "No applicable source text was found for this date. "
+            "I cannot answer this question from the available corpus.\n\n" + DISCLAIMER,
+            "model": None,
+            "degraded": False,
+        }
     with span("generate") as s:
         try:
             gen = generate_answer(state["question"], state.get("contexts") or state["hits"])
@@ -103,13 +119,41 @@ def _verify(state: AgentState) -> dict:
     with span("verify") as s:
         ok, _cited, hallucinated = verify_citations(state["answer"], state["hits"])
         s.note(verified=ok, hallucinated=hallucinated)
+    import re
+
     seen, citations = set(), []
+    evidence_mode = any(h.get("evidence_id") for h in state["hits"])
+    evidence_cited = set(re.findall(r"\[(E:[^\]]+)\]", state["answer"]))
+    evidence_known = {h.get("citation_id") for h in state["hits"]}
+    hallucinated.extend(sorted(evidence_cited - evidence_known))
+    if evidence_mode and not evidence_cited:
+        hallucinated.append("Missing page evidence citations")
     for h in state["hits"]:
         dn = h["doc_number"]
-        if dn in state["answer"] and dn not in seen:
-            seen.add(dn)
-            citations.append({"doc_number": dn, "title": h["title"], "url": h["source_url"]})
-    return {"verified": ok, "hallucinated": hallucinated, "citations": citations}
+        key = h.get("evidence_id") or dn.lower()
+        cited = (
+            h.get("citation_id") in evidence_cited
+            if evidence_mode
+            else (dn.lower() in {c.lower() for c in _cited})
+        )
+        if cited and key not in seen:
+            seen.add(key)
+            citations.append(
+                {
+                    "doc_number": dn,
+                    "title": h["title"],
+                    "url": h["source_url"],
+                    "evidence_id": h.get("evidence_id"),
+                    "page_start": h.get("page_start"),
+                    "page_end": h.get("page_end"),
+                    "evidence_url": h.get("evidence_url"),
+                }
+            )
+    return {
+        "verified": ok and not hallucinated,
+        "hallucinated": hallucinated,
+        "citations": citations,
+    }
 
 
 def _groundedness(state: AgentState) -> dict:
@@ -134,10 +178,20 @@ def _respond(state: AgentState) -> dict:
             "title": h["title"],
             "section_heading": h.get("section_heading"),
             "score": round(h["score"], 4),
+            "evidence_id": h.get("evidence_id"),
+            "page_start": h.get("page_start"),
+            "page_end": h.get("page_end"),
+            "evidence_url": h.get("evidence_url"),
+            "text": h.get("text"),
         }
         for h in state.get("hits", [])
     ]
     answer = state["answer"]
+    if not state.get("verified", True):
+        answer = (
+            "I could not validate the generated citations. "
+            "Please inspect the retrieved evidence directly.\n\n" + DISCLAIMER
+        )
     if state.get("low_confidence"):
         # Spec §11.8: below the groundedness threshold, say so rather than
         # presenting a weakly-supported answer as reliable.
@@ -158,6 +212,13 @@ def _respond(state: AgentState) -> dict:
             "verified_citations": state.get("verified", True),
             "hallucinated_citations": state.get("hallucinated", []),
             "groundedness": state.get("groundedness"),
+            "retrieval_strategy": state["strategy"],
+            "corpus_revision": state.get("corpus_revision"),
+            "graph_paths": list(
+                {
+                    p["id"]: p for h in state.get("hits", []) for p in h.get("graph_paths", [])
+                }.values()
+            ),
             "low_confidence": state.get("low_confidence", False),
         }
     }
@@ -172,13 +233,13 @@ def _refuse(state: AgentState) -> dict:
             ),
             "citations": [],
             "retrieved_sources": [],
-            "reference_date_used": date.today().isoformat(),
+            "reference_date_used": state.get("reference_date") or date.today().isoformat(),
             "in_force_docs": None,
             "model": None,
             "degraded": False,
             "verified_citations": True,
             "hallucinated_citations": [],
-            "groundedness": None,   # nothing retrieved to be grounded against
+            "groundedness": None,  # nothing retrieved to be grounded against
             "low_confidence": False,
         }
     }
@@ -192,6 +253,7 @@ def build_agent():
     g = StateGraph(AgentState)
     g.add_node("classify", _classify)
     g.add_node("resolve_temporal", _resolve_temporal)
+    g.add_node("cache_lookup", _cache_lookup)
     g.add_node("retrieve", _retrieve)
     g.add_node("expand", _expand)
     g.add_node("generate", _generate)
@@ -202,10 +264,16 @@ def build_agent():
 
     g.add_edge(START, "classify")
     g.add_conditional_edges(
-        "classify", _route_scope,
+        "classify",
+        _route_scope,
         {"resolve_temporal": "resolve_temporal", "refuse": "refuse"},
     )
-    g.add_edge("resolve_temporal", "retrieve")
+    g.add_edge("resolve_temporal", "cache_lookup")
+    g.add_conditional_edges(
+        "cache_lookup",
+        lambda state: "hit" if state.get("response") else "miss",
+        {"hit": END, "miss": "retrieve"},
+    )
     g.add_edge("retrieve", "expand")
     g.add_edge("expand", "generate")
     g.add_edge("generate", "verify")
@@ -217,26 +285,53 @@ def build_agent():
 
 
 _agent = None
-_cache = None
+_cache = ExactCache(ttl_seconds=settings.cache_ttl_seconds)
 
 
-def run_agent(question: str, reference_date: str | None = None, use_cache: bool = True) -> dict:
-    """Run the full agent and return the response payload (semantic-cached)."""
-    global _agent, _cache
+def _cache_lookup(state: AgentState) -> dict:
+    key = (
+        state["question"].strip(),
+        state["ref_date_iso"],
+        state["corpus_revision"],
+        state["strategy"],
+        settings.llm_provider,
+        settings.llm_base_url,
+        settings.llm_model,
+        settings.llm_model_fast,
+        settings.embedding_model,
+        settings.groundedness_threshold,
+        GENERATION_PROMPT_VERSION,
+    )
+    hit = _cache.get(key) if state.get("use_cache", True) else None
+    return {"cache_key": key, **({"response": {**hit, "cached": True}} if hit else {})}
+
+
+def run_agent(
+    question: str,
+    reference_date: str | None = None,
+    use_cache: bool = True,
+    strategy: str | None = None,
+) -> dict:
+    """Resolve date and corpus revision before consulting the exact cache."""
+    global _agent
+    strategy = strategy or settings.retrieval_strategy
+    if strategy not in STRATEGIES:
+        raise ValueError(f"Unknown retrieval strategy: {strategy}")
+    if reference_date:
+        reference_date = date.fromisoformat(reference_date).isoformat()
     if _agent is None:
-        from app.agent.cache import SemanticCache
-
         _agent = build_agent()
-        _cache = SemanticCache()
-
-    if use_cache:
-        hit = _cache.get(question, reference_date)
-        if hit is not None:
-            return {**hit, "cached": True}
-
-    final = _agent.invoke({"question": question, "reference_date": reference_date})
+    final = _agent.invoke(
+        {
+            "question": question,
+            "reference_date": reference_date,
+            "strategy": strategy,
+            "use_cache": use_cache,
+        }
+    )
     response = final["response"]
-    response["cached"] = False
-    if use_cache and not response.get("degraded"):
-        _cache.put(question, reference_date, response)
+    response.setdefault("cached", False)
+    if use_cache and final.get("cache_key") and not response.get("degraded"):
+        if not response["cached"]:
+            _cache.put(final["cache_key"], response)
     return response

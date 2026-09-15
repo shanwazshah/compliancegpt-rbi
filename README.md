@@ -239,7 +239,7 @@ four rules that follow from it — chiefly that "not measured" is `null` and nev
 ```bash
 docker compose up -d                                   # Postgres + Qdrant
 python -m venv .venv && .venv\Scripts\activate         # (bash: source .venv/bin/activate)
-pip install -e ".[dev]"
+pip install -e ".[dev,vector]"
 cp .env.example .env      # then set LLM_API_KEY (free Groq key: console.groq.com)
 uvicorn app.main:app --reload                          # http://localhost:8000/docs
 ```
@@ -261,6 +261,19 @@ interface** (see [ADR 0006](docs/adr/0006-swappable-models-behind-interfaces.md)
 | Embeddings | `bge-small-en-v1.5` | `bge-m3` |
 | Reranker | `ms-marco-MiniLM-L-6-v2` | `bge-reranker-v2-m3` |
 | PDF parser | pdfplumber | Docling |
+
+## Advanced RAG development
+
+The local-first extension now has a canonical versioned page store, deterministic
+vectorless PageIndex navigation, immutable physical-page citations and a reviewed-state
+knowledge graph. Runtime PageIndex retrieval needs PostgreSQL only; hosted model navigation
+is an explicit option. On a frozen 10-question internal holdout, local PageIndex found the
+correct document in 10/10 cases and the checked physical page in 9/10, with 100% evidence-ID
+resolution and 100 ms p95 latency. It scored 15/15 pages on the development set, which was
+used during tuning. Neither set has independent legal review. See the
+[benchmark report](evals/reports/advanced_retrieval.md) and
+[implementation guide](docs/ADVANCED_RAG_IMPLEMENTATION.md). The existing dense route
+remains the default until a broader holdout justifies changing it.
 
 ## Status
 

@@ -18,7 +18,7 @@ from app.config import settings
 @contextmanager
 def get_connection():
     """Yield a Postgres connection; commits on success, rolls back on error."""
-    conn = psycopg.connect(settings.database_url)
+    conn = psycopg.connect(settings.database_url, connect_timeout=5)
     try:
         yield conn
         conn.commit()
@@ -68,7 +68,7 @@ def count_documents(conn: psycopg.Connection) -> int:
         return cur.fetchone()[0]
 
 
-def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
+def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> str:
     """Persist one query log row (query_text must already be PII-redacted)."""
     sql = """
         INSERT INTO query_logs (query_text, reference_date, in_force_docs,
@@ -81,6 +81,7 @@ def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
                 %(verified_citations)s, %(latency_ms)s,
                 %(prompt_tokens)s, %(completion_tokens)s, %(token_cost)s,
                 %(groundedness_score)s, %(cache_hit)s, %(llm_model)s)
+        RETURNING id
     """
     # Tolerate callers that predate migration 0003's columns.
     row = {
@@ -94,6 +95,7 @@ def insert_query_log(conn: psycopg.Connection, rec: dict[str, Any]) -> None:
     }
     with conn.cursor() as cur:
         cur.execute(sql, row)
+        return str(cur.fetchone()[0])
 
 
 def insert_feedback(
@@ -238,3 +240,21 @@ def supersession_history(conn: psycopg.Connection, doc_id: str) -> dict:
             return out
 
     return {"predecessors": _rows(predecessors_sql), "successors": _rows(successors_sql)}
+
+
+def corpus_revision(conn, include_evidence: bool = False) -> str:
+    """Fingerprint actual temporal metadata; cache expiry alone is insufficient."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT md5(COALESCE((SELECT string_agg(
+                ROW(id,updated_at,issue_date,effective_date,withdrawn_date,status)::text,
+                '' ORDER BY id) FROM documents), '') ||
+                COALESCE((SELECT string_agg(
+                ROW(id,predecessor_doc_id,successor_doc_id,relation_type,effective_date,
+                    extraction_method)::text, '' ORDER BY id) FROM supersession_edges), ''))
+        """)
+        revision = cur.fetchone()[0]
+        if include_evidence:
+            cur.execute("SELECT revision FROM evidence_revision WHERE singleton")
+            revision += ':' + str(cur.fetchone()[0])
+        return revision

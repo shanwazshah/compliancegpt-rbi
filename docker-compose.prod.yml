@@ -27,17 +27,24 @@ services:
       - qdrant_data:/qdrant/storage
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        EXTRAS: ${INSTALL_EXTRAS:-vector}
     container_name: compliance_app
     environment:
       DATABASE_URL: postgresql://compliance:compliance@postgres:5432/compliancegpt
       QDRANT_URL: http://qdrant:6333
+      API_KEY: ${API_KEY:?set API_KEY for the production API}
+      RETRIEVAL_STRATEGY: ${RETRIEVAL_STRATEGY:-dense}
       LLM_PROVIDER: groq
       LLM_MODEL: llama-3.3-70b-versatile
       LLM_BASE_URL: https://api.groq.com/openai/v1
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY (Groq gsk_...) in the environment}
       EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
       EMBEDDING_DIM: "384"
+    volumes:
+      - evidence_data:/app/data
     ports:
       - "8000:8000"
     depends_on:
@@ -49,3 +56,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  evidence_data:
